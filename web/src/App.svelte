@@ -2,10 +2,12 @@
   import { onMount } from 'svelte';
   import { api, net } from './api.svelte.js';
   import { i18n, languages, setLang, t } from './i18n.svelte.js';
+  import { admin, refreshPending } from './admin.svelte.js';
   import { router, match } from './router.svelte.js';
   import Home from './views/Home.svelte';
   import Circle from './views/Circle.svelte';
   import Join from './views/Join.svelte';
+  import Admin from './views/Admin.svelte';
   import Person from './views/Person.svelte';
   import Profile from './views/Profile.svelte';
 
@@ -14,7 +16,10 @@
   async function load() {
     state = { kind: 'loading' };
     const r = await api.get('/api/me');
-    if (r.kind === 'ok') state = { kind: 'ok', user: r.data };
+    if (r.kind === 'ok') {
+      state = { kind: 'ok', user: r.data };
+      if (r.data.is_admin && r.data.status === 'approved') refreshPending();
+    }
     else if (r.kind === 'session') state = { kind: 'session' };
     else if (r.kind === 'http' && r.status === 503) state = { kind: 'closed' };
     else state = { kind: 'error' };
@@ -32,6 +37,7 @@
     if ((p = match('/persons/:id', router.path))) return { view: 'person', ...p };
     if ((p = match('/join/:token', router.path))) return { view: 'join', ...p };
     if (match('/profile', router.path)) return { view: 'profile' };
+    if (match('/admin', router.path) && state.kind === 'ok' && state.user.is_admin) return { view: 'admin' };
     return { view: 'notfound' };
   });
 </script>
@@ -40,6 +46,9 @@
   <a class="brand" href="#/"><strong>{t('appName')}</strong></a>
   <span class="row">
     {#if state.kind === 'ok' && state.user.status === 'approved'}
+      {#if state.user.is_admin}
+        <a href="#/admin">{t('adminLink')}{#if admin.pending > 0} <span class="badge">{admin.pending}</span>{/if}</a>
+      {/if}
       <a href="#/profile">{state.user.name}</a>
     {/if}
     <label>
@@ -98,6 +107,8 @@
     {#key route.id}<Person id={route.id} me={state.user} />{/key}
   {:else if route.view === 'join'}
     <Join token={route.token} />
+  {:else if route.view === 'admin'}
+    <Admin />
   {:else if route.view === 'profile'}
     <Profile me={state.user} onchange={(u) => (state = { kind: 'ok', user: u })} />
   {:else}
