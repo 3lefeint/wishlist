@@ -6,6 +6,7 @@
   import Home from './views/Home.svelte';
   import Circle from './views/Circle.svelte';
   import Join from './views/Join.svelte';
+  import Person from './views/Person.svelte';
   import Profile from './views/Profile.svelte';
 
   let state = $state({ kind: 'loading' });
@@ -28,6 +29,7 @@
     let p;
     if (match('/', router.path)) return { view: 'home' };
     if ((p = match('/circles/:id', router.path))) return { view: 'circle', ...p };
+    if ((p = match('/persons/:id', router.path))) return { view: 'person', ...p };
     if ((p = match('/join/:token', router.path))) return { view: 'join', ...p };
     if (match('/profile', router.path)) return { view: 'profile' };
     return { view: 'notfound' };
@@ -92,6 +94,8 @@
     <Home />
   {:else if route.view === 'circle'}
     {#key route.id}<Circle id={route.id} me={state.user} />{/key}
+  {:else if route.view === 'person'}
+    {#key route.id}<Person id={route.id} me={state.user} />{/key}
   {:else if route.view === 'join'}
     <Join token={route.token} />
   {:else if route.view === 'profile'}

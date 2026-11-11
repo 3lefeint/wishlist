@@ -24,6 +24,9 @@ patches:
       - op: replace
         path: /spec/template/spec/initContainers/0/env/0/valueFrom/secretKeyRef/name
         value: wishlist-stg-migrate
+      - op: replace
+        path: /spec/template/spec/volumes/0/persistentVolumeClaim/claimName
+        value: wishlist-stg-uploads
   - target:
       kind: Ingress
       name: wishlist

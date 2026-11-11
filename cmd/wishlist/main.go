@@ -19,6 +19,8 @@ import (
 	"github.com/3lefeint/wishlist/internal/access"
 	"github.com/3lefeint/wishlist/internal/circles"
 	"github.com/3lefeint/wishlist/internal/db"
+	"github.com/3lefeint/wishlist/internal/gifts"
+	"github.com/3lefeint/wishlist/internal/images"
 	"github.com/3lefeint/wishlist/internal/server"
 	"github.com/3lefeint/wishlist/internal/users"
 	"github.com/3lefeint/wishlist/web"
@@ -75,11 +77,28 @@ func main() {
 
 	store := users.NewStore(pool, admins, maxPending)
 	circleStore := circles.NewStore(pool)
+	giftStore := gifts.NewStore(pool)
+
+	var imageStore *images.Store
+	if dir := os.Getenv("WISHLIST_UPLOAD_DIR"); dir != "" {
+		imageStore, err = images.NewStore(dir)
+		if err != nil {
+			log.Error("uploads disabled", "err", err)
+		} else if keep, err := giftStore.ImageIDs(ctx); err != nil {
+			log.Error("image sweep", "err", err)
+		} else if n, err := imageStore.Sweep(keep); err != nil {
+			log.Error("image sweep", "err", err)
+		} else if n > 0 {
+			log.Info("removed orphaned image files", "count", n)
+		}
+	}
 	verifier := access.NewVerifier(team, aud)
 
 	api := &server.Server{
 		Store:   store,
 		Circles: circleStore,
+		Gifts:   giftStore,
+		Images:  imageStore,
 		Auth: func(r *http.Request) (string, error) {
 			c, err := verifier.Verify(r.Header.Get(access.Header))
 			if err != nil {

@@ -14,6 +14,8 @@ import (
 
 	"github.com/3lefeint/wishlist/internal/circles"
 	"github.com/3lefeint/wishlist/internal/db"
+	"github.com/3lefeint/wishlist/internal/gifts"
+	"github.com/3lefeint/wishlist/internal/images"
 	"github.com/3lefeint/wishlist/internal/users"
 )
 
@@ -35,9 +37,15 @@ func newTestServer(t *testing.T) *httptest.Server {
 	if _, err := pool.Exec(ctx, "TRUNCATE users, circles RESTART IDENTITY CASCADE"); err != nil {
 		t.Fatal(err)
 	}
+	imgs, err := images.NewStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	s := &Server{
 		Store:   users.NewStore(pool, []string{"root@example.com"}, 10),
 		Circles: circles.NewStore(pool),
+		Gifts:   gifts.NewStore(pool),
+		Images:  imgs,
 		Auth: func(r *http.Request) (string, error) {
 			if e := r.Header.Get("X-Test-Email"); e != "" {
 				return e, nil

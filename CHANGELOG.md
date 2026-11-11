@@ -10,3 +10,4 @@
 - Admin API to list, approve, block and delete users
 - Frontend shell (Svelte, German and English) with sign-in states, installable as an app, served by the backend
 - Circles with invite links, members and persons without an account, with display names and guardians
+- Gifts with tags, one downscaled image, claims and deactivation
