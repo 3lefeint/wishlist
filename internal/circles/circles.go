@@ -70,6 +70,7 @@ type Person struct {
 	Guardians     []int64 `json:"guardians"`
 	Birthday      string  `json:"birthday"`
 	FavoriteColor string  `json:"favorite_color"`
+	HouseholdID   *int64  `json:"household_id"`
 }
 
 // personBirthday and personColor take the values of the linked user for a
@@ -89,9 +90,10 @@ type Invite struct {
 // Detail is a circle with its members and persons.
 type Detail struct {
 	Circle
-	Members []Member `json:"members"`
-	Persons []Person `json:"persons"`
-	Invite  *Invite  `json:"invite"`
+	Members    []Member    `json:"members"`
+	Persons    []Person    `json:"persons"`
+	Households []Household `json:"households"`
+	Invite     *Invite     `json:"invite"`
 }
 
 func cleanName(name string) (string, error) {
@@ -237,7 +239,7 @@ func (s *Store) load(ctx context.Context, circleID int64, r string) (Detail, err
 	prow, err := s.pool.Query(ctx, `
 		SELECT p.id, CASE WHEN p.user_id IS NULL THEN p.name ELSE `+users.NameExpr+` END, p.user_id,
 		       COALESCE((SELECT array_agg(g.user_id ORDER BY g.user_id) FROM person_guardians g WHERE g.person_id = p.id), '{}'),
-		       `+personBirthday+`, `+personColor+`
+		       `+personBirthday+`, `+personColor+`, p.household_id
 		FROM persons p LEFT JOIN users ON users.id = p.user_id
 		WHERE p.circle_id = $1 ORDER BY p.user_id IS NULL, lower(CASE WHEN p.user_id IS NULL THEN p.name ELSE `+users.NameExpr+` END), p.id`, circleID)
 	if err != nil {
@@ -247,7 +249,7 @@ func (s *Store) load(ctx context.Context, circleID int64, r string) (Detail, err
 	d.Persons = []Person{}
 	for prow.Next() {
 		var p Person
-		if err := prow.Scan(&p.ID, &p.Name, &p.UserID, &p.Guardians, &p.Birthday, &p.FavoriteColor); err != nil {
+		if err := prow.Scan(&p.ID, &p.Name, &p.UserID, &p.Guardians, &p.Birthday, &p.FavoriteColor, &p.HouseholdID); err != nil {
 			return d, err
 		}
 		d.Persons = append(d.Persons, p)
@@ -256,6 +258,24 @@ func (s *Store) load(ctx context.Context, circleID int64, r string) (Detail, err
 		return d, err
 	}
 	prow.Close()
+
+	hrows, err := s.pool.Query(ctx, `SELECT id, name FROM households WHERE circle_id = $1 ORDER BY lower(name), id`, circleID)
+	if err != nil {
+		return d, err
+	}
+	defer hrows.Close()
+	d.Households = []Household{}
+	for hrows.Next() {
+		var h Household
+		if err := hrows.Scan(&h.ID, &h.Name); err != nil {
+			return d, err
+		}
+		d.Households = append(d.Households, h)
+	}
+	if err := hrows.Err(); err != nil {
+		return d, err
+	}
+	hrows.Close()
 
 	if r == "admin" {
 		var inv Invite
@@ -599,14 +619,14 @@ func (s *Store) GetPerson(ctx context.Context, userID, personID int64) (PersonDe
 	err := s.pool.QueryRow(ctx, `
 		SELECT p.id, CASE WHEN p.user_id IS NULL THEN p.name ELSE `+users.NameExpr+` END, p.user_id,
 		       COALESCE((SELECT array_agg(g.user_id ORDER BY g.user_id) FROM person_guardians g WHERE g.person_id = p.id), '{}'),
-		       `+personBirthday+`, `+personColor+`,
+		       `+personBirthday+`, `+personColor+`, p.household_id,
 		       c.id, c.name
 		FROM persons p
 		JOIN circles c ON c.id = p.circle_id
 		LEFT JOIN circle_members m ON m.circle_id = c.id AND m.user_id = $2
 		LEFT JOIN users ON users.id = p.user_id
 		WHERE p.id = $1 AND (m.user_id IS NOT NULL OR EXISTS (SELECT 1 FROM users o WHERE o.id = $2 AND o.is_admin))`, personID, userID).
-		Scan(&d.ID, &d.Name, &d.UserID, &d.Guardians, &d.Birthday, &d.FavoriteColor, &d.CircleID, &d.CircleName)
+		Scan(&d.ID, &d.Name, &d.UserID, &d.Guardians, &d.Birthday, &d.FavoriteColor, &d.HouseholdID, &d.CircleID, &d.CircleName)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return d, ErrNotFound
 	}

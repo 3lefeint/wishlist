@@ -23,6 +23,10 @@ func (s *Server) circleRoutes(mux *http.ServeMux) {
 	mux.Handle("DELETE /api/persons/{id}", s.member(s.deletePerson))
 	mux.Handle("POST /api/persons/{id}/guardians", s.member(s.addGuardian))
 	mux.Handle("DELETE /api/persons/{id}/guardians/{userID}", s.member(s.removeGuardian))
+	mux.Handle("POST /api/circles/{id}/households", s.member(s.createHousehold))
+	mux.Handle("PUT /api/households/{id}", s.member(s.renameHousehold))
+	mux.Handle("DELETE /api/households/{id}", s.member(s.deleteHousehold))
+	mux.Handle("PUT /api/persons/{id}/household", s.member(s.setPersonHousehold))
 }
 
 // circleError answers for a failed circle call and reports whether it did.
