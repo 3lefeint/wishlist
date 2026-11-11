@@ -11,6 +11,8 @@ import (
 	"strconv"
 
 	"github.com/3lefeint/wishlist/internal/circles"
+	"github.com/3lefeint/wishlist/internal/gifts"
+	"github.com/3lefeint/wishlist/internal/images"
 	"github.com/3lefeint/wishlist/internal/users"
 )
 
@@ -18,6 +20,9 @@ import (
 type Server struct {
 	Store   *users.Store
 	Circles *circles.Store
+	Gifts   *gifts.Store
+	// Images stores gift pictures; nil disables uploads.
+	Images *images.Store
 	// Auth returns the verified e-mail address of the request or an error.
 	Auth func(*http.Request) (string, error)
 	// Ping checks the database.
@@ -42,6 +47,7 @@ func (s *Server) Handler() http.Handler {
 	}))
 	mux.Handle("PUT /api/me", s.signedIn(s.setName))
 	s.circleRoutes(mux)
+	s.giftRoutes(mux)
 	mux.Handle("GET /api/admin/users", s.admin(s.listUsers))
 	mux.Handle("PUT /api/admin/users/{id}/status", s.admin(s.setStatus))
 	mux.Handle("DELETE /api/admin/users/{id}", s.admin(s.deleteUser))

@@ -13,6 +13,7 @@ spec:
         app: wishlist
     spec:
       securityContext:
+        fsGroup: 65532
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
@@ -59,6 +60,10 @@ spec:
                 secretKeyRef:
                   name: wishlist-database
                   key: url
+            - name: WISHLIST_UPLOAD_DIR
+              value: /data/uploads
+            - name: GOMEMLIMIT
+              value: 400MiB
           readinessProbe:
             httpGet:
               path: /healthz
@@ -70,11 +75,18 @@ spec:
           resources:
             requests:
               cpu: 20m
-              memory: 32Mi
+              memory: 64Mi
             limits:
-              memory: 128Mi
+              memory: 512Mi
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
+          volumeMounts:
+            - name: uploads
+              mountPath: /data/uploads
+      volumes:
+        - name: uploads
+          persistentVolumeClaim:
+            claimName: wishlist-uploads

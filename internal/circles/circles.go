@@ -280,6 +280,11 @@ func (s *Store) RemoveMember(ctx context.Context, actorID, circleID, targetID in
 }
 
 func dropMemberData(ctx context.Context, tx pgx.Tx, circleID, userID int64) error {
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM claims WHERE user_id = $2
+		AND gift_id IN (SELECT id FROM gifts WHERE circle_id = $1)`, circleID, userID); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(ctx, `DELETE FROM persons WHERE circle_id = $1 AND user_id = $2`, circleID, userID); err != nil {
 		return err
 	}
@@ -503,4 +508,33 @@ func (s *Store) RemoveGuardian(ctx context.Context, actorID, personID, guardian 
 	}
 	_, err = s.pool.Exec(ctx, `DELETE FROM person_guardians WHERE person_id = $1 AND user_id = $2`, personID, guardian)
 	return err
+}
+
+// PersonDetail is a person with the circle it belongs to.
+type PersonDetail struct {
+	Person
+	CircleID   int64    `json:"circle_id"`
+	CircleName string   `json:"circle_name"`
+	IsSelf     bool     `json:"is_self"`
+	Members    []Member `json:"members"`
+}
+
+// GetPerson returns a person for a member of its circle.
+func (s *Store) GetPerson(ctx context.Context, userID, personID int64) (PersonDetail, error) {
+	var d PersonDetail
+	err := s.pool.QueryRow(ctx, `
+		SELECT p.id, CASE WHEN p.user_id IS NULL THEN p.name ELSE `+users.NameExpr+` END, p.user_id,
+		       COALESCE((SELECT array_agg(g.user_id ORDER BY g.user_id) FROM person_guardians g WHERE g.person_id = p.id), '{}'),
+		       c.id, c.name
+		FROM persons p
+		JOIN circles c ON c.id = p.circle_id
+		JOIN circle_members m ON m.circle_id = c.id AND m.user_id = $2
+		LEFT JOIN users ON users.id = p.user_id
+		WHERE p.id = $1`, personID, userID).
+		Scan(&d.ID, &d.Name, &d.UserID, &d.Guardians, &d.CircleID, &d.CircleName)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return d, ErrNotFound
+	}
+	d.IsSelf = d.UserID != nil && *d.UserID == userID
+	return d, err
 }

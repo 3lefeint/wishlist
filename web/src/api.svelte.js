@@ -46,3 +46,22 @@ export const api = {
   put: (path, body = {}) => request('PUT', path, body),
   del: (path) => request('DELETE', path),
 };
+
+// Uploads an image for a gift (multipart); same result kinds as request().
+export async function uploadImage(giftId, file) {
+  const form = new FormData();
+  form.append('image', file);
+  let res;
+  try {
+    res = await fetch(`/api/gifts/${giftId}/image`, { method: 'POST', body: form, redirect: 'manual' });
+  } catch {
+    net.sessionExpired = true;
+    return { kind: 'session' };
+  }
+  if (res.type === 'opaqueredirect' || res.status === 401) {
+    net.sessionExpired = true;
+    return { kind: 'session' };
+  }
+  if (res.ok) return { kind: 'ok', status: res.status, data: null };
+  return { kind: 'http', status: res.status, message: (await res.text()).trim() };
+}
