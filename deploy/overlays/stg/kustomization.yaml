@@ -18,6 +18,12 @@ patches:
       - op: replace
         path: /spec/template/spec/containers/0/env/1/valueFrom/secretKeyRef/name
         value: wishlist-stg-access
+      - op: replace
+        path: /spec/template/spec/containers/0/env/2/valueFrom/secretKeyRef/name
+        value: wishlist-stg-database
+      - op: replace
+        path: /spec/template/spec/initContainers/0/env/0/valueFrom/secretKeyRef/name
+        value: wishlist-stg-migrate
   - target:
       kind: Ingress
       name: wishlist
