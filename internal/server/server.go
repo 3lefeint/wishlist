@@ -51,6 +51,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/admin/users", s.admin(s.listUsers))
 	mux.Handle("PUT /api/admin/users/{id}/status", s.admin(s.setStatus))
 	mux.Handle("DELETE /api/admin/users/{id}", s.admin(s.deleteUser))
+	s.adminContentRoutes(mux)
 	if s.Files != nil {
 		mux.Handle("GET /", spa(s.Files))
 	}

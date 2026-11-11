@@ -42,7 +42,9 @@ func (s *Server) circleError(w http.ResponseWriter, err error) bool {
 		http.Error(w, "invite link is invalid or expired", http.StatusNotFound)
 	case errors.Is(err, circles.ErrNotMember):
 		http.Error(w, "user is not a member of the circle", http.StatusBadRequest)
-	case errors.Is(err, circles.ErrLastAdmin), errors.Is(err, circles.ErrLinked):
+	case errors.Is(err, circles.ErrInvalidRole):
+		http.Error(w, "invalid role", http.StatusBadRequest)
+	case errors.Is(err, circles.ErrLastAdmin), errors.Is(err, circles.ErrLinked), errors.Is(err, circles.ErrMember):
 		http.Error(w, err.Error(), http.StatusConflict)
 	default:
 		s.internal(w, "circles", err)
