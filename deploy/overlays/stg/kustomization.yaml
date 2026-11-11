@@ -1,0 +1,27 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+nameSuffix: -stg
+images:
+  - name: ghcr.io/3lefeint/wishlist
+    newName: registry.example.com/img/repo/wishlist
+    newTag: stg
+patches:
+  - target:
+      kind: Deployment
+      name: wishlist
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/env/0/valueFrom/secretKeyRef/name
+        value: wishlist-stg-access
+      - op: replace
+        path: /spec/template/spec/containers/0/env/1/valueFrom/secretKeyRef/name
+        value: wishlist-stg-access
+  - target:
+      kind: Ingress
+      name: wishlist
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/host
+        value: wishlist-stg.example.com
