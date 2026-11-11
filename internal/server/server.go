@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -20,6 +21,8 @@ type Server struct {
 	// Ping checks the database.
 	Ping func(context.Context) error
 	Log  *slog.Logger
+	// Files holds the built frontend; nil serves no frontend.
+	Files fs.FS
 }
 
 // Handler returns the routes of the API.
@@ -38,6 +41,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/admin/users", s.admin(s.listUsers))
 	mux.Handle("PUT /api/admin/users/{id}/status", s.admin(s.setStatus))
 	mux.Handle("DELETE /api/admin/users/{id}", s.admin(s.deleteUser))
+	if s.Files != nil {
+		mux.Handle("GET /", spa(s.Files))
+	}
 	return mux
 }
 

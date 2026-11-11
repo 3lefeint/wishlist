@@ -1,0 +1,25 @@
+:root {
+  --bg: #faf8ff;
+  --fg: #1f1b2e;
+  --muted: #6b6683;
+  --accent: #7c3aed;
+  --card: #ffffff;
+  --border: #e5e0f5;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14111f;
+    --fg: #ece9f7;
+    --muted: #9a94b5;
+    --card: #1e1a2e;
+    --border: #322c4a;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 16px/1.5 system-ui, sans-serif;
+}
