@@ -20,6 +20,7 @@ import (
 	"github.com/3lefeint/wishlist/internal/db"
 	"github.com/3lefeint/wishlist/internal/server"
 	"github.com/3lefeint/wishlist/internal/users"
+	"github.com/3lefeint/wishlist/web"
 )
 
 func main() {
@@ -83,8 +84,9 @@ func main() {
 			}
 			return c.Email, nil
 		},
-		Ping: pool.Ping,
-		Log:  log,
+		Ping:  pool.Ping,
+		Log:   log,
+		Files: web.Dist(),
 	}
 
 	srv := &http.Server{

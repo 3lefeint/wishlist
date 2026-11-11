@@ -8,3 +8,4 @@
 - Backend skeleton with health check and Cloudflare Access JWT verification, Dockerfile and Kustomize overlays for staging and production
 - PostgreSQL connection, migrations and registration of users as pending on first sign-in
 - Admin API to list, approve, block and delete users
+- Frontend shell (Svelte, German and English) with sign-in states, installable as an app, served by the backend

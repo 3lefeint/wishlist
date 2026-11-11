@@ -1,0 +1,9 @@
+{
+  "name": "Wishlist",
+  "short_name": "Wishlist",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#faf8ff",
+  "theme_color": "#7c3aed",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}
