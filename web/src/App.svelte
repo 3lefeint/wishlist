@@ -34,12 +34,12 @@
 
   const route = $derived.by(() => {
     let p;
+    const isAdmin = state.kind === 'ok' && state.user.is_admin;
     if (match('/', router.path)) return { view: 'home' };
     if ((p = match('/circles/:id', router.path))) return { view: 'circle', ...p };
     if ((p = match('/persons/:id', router.path))) return { view: 'person', ...p };
     if ((p = match('/join/:token', router.path))) return { view: 'join', ...p };
     if (match('/profile', router.path)) return { view: 'profile' };
-    const isAdmin = state.kind === 'ok' && state.user.is_admin;
     if (isAdmin && match('/admin', router.path)) return { view: 'admin' };
     if (isAdmin && match('/admin/circles', router.path)) return { view: 'adminCircles' };
     if (isAdmin && (p = match('/admin/circles/:id', router.path))) return { view: 'adminCircle', ...p };
@@ -107,7 +107,7 @@
       <p>{t('blockedText')}</p>
     </section>
   {:else if route.view === 'home'}
-    <Home />
+    <Home me={state.user} />
   {:else if route.view === 'circle'}
     {#key route.id}<Circle id={route.id} me={state.user} />{/key}
   {:else if route.view === 'person'}

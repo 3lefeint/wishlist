@@ -10,14 +10,14 @@ import (
 
 func (s *Server) circleRoutes(mux *http.ServeMux) {
 	mux.Handle("GET /api/circles", s.member(s.listCircles))
-	mux.Handle("POST /api/circles", s.member(s.createCircle))
+	mux.Handle("POST /api/circles", s.memberOnly(s.createCircle))
 	mux.Handle("GET /api/circles/{id}", s.member(s.getCircle))
 	mux.Handle("DELETE /api/circles/{id}", s.member(s.deleteCircle))
 	mux.Handle("DELETE /api/circles/{id}/members/{userID}", s.member(s.removeMember))
 	mux.Handle("POST /api/circles/{id}/invite", s.member(s.createInvite))
 	mux.Handle("DELETE /api/circles/{id}/invite", s.member(s.revokeInvite))
 	mux.Handle("GET /api/invites/{token}", s.member(s.inviteInfo))
-	mux.Handle("POST /api/invites/{token}/join", s.member(s.joinCircle))
+	mux.Handle("POST /api/invites/{token}/join", s.memberOnly(s.joinCircle))
 	mux.Handle("POST /api/circles/{id}/persons", s.member(s.createPerson))
 	mux.Handle("PUT /api/persons/{id}", s.member(s.updatePerson))
 	mux.Handle("DELETE /api/persons/{id}", s.member(s.deletePerson))
@@ -44,7 +44,7 @@ func (s *Server) circleError(w http.ResponseWriter, err error) bool {
 		http.Error(w, "user is not a member of the circle", http.StatusBadRequest)
 	case errors.Is(err, circles.ErrInvalidRole):
 		http.Error(w, "invalid role", http.StatusBadRequest)
-	case errors.Is(err, circles.ErrLastAdmin), errors.Is(err, circles.ErrLinked), errors.Is(err, circles.ErrMember):
+	case errors.Is(err, circles.ErrLastAdmin), errors.Is(err, circles.ErrLinked), errors.Is(err, circles.ErrMember), errors.Is(err, circles.ErrOperator):
 		http.Error(w, err.Error(), http.StatusConflict)
 	default:
 		s.internal(w, "circles", err)

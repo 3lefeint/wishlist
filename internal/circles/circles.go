@@ -27,6 +27,7 @@ var (
 	ErrInvite      = errors.New("invite link is invalid or expired")
 	ErrNotMember   = errors.New("user is not a member of the circle")
 	ErrLinked      = errors.New("persons with an account cannot be changed this way")
+	ErrOperator    = errors.New("the operator account cannot be a circle member")
 )
 
 // InviteLifetime is how long an invite link works.
@@ -115,6 +116,28 @@ func role(ctx context.Context, q querier, circleID, userID int64) (string, error
 	return r, err
 }
 
+// actorRole returns the role of the acting user in a circle. The operator account acts as
+// administrator of every existing circle without being a member; everyone else needs a membership.
+func actorRole(ctx context.Context, q querier, circleID, userID int64) (string, error) {
+	var r string
+	err := q.QueryRow(ctx, `
+		SELECT CASE WHEN u.is_admin THEN 'admin' ELSE m.role END
+		FROM users u
+		JOIN circles c ON c.id = $1
+		LEFT JOIN circle_members m ON m.circle_id = c.id AND m.user_id = u.id
+		WHERE u.id = $2 AND (u.is_admin OR m.user_id IS NOT NULL)`, circleID, userID).Scan(&r)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return r, err
+}
+
+func isOperator(ctx context.Context, q querier, userID int64) (bool, error) {
+	var op bool
+	err := q.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM users WHERE id = $1 AND is_admin)`, userID).Scan(&op)
+	return op, err
+}
+
 // Create creates a circle with the user as its administrator.
 func (s *Store) Create(ctx context.Context, userID int64, name string) (Circle, error) {
 	name, err := cleanName(name)
@@ -146,9 +169,14 @@ func addMember(ctx context.Context, tx pgx.Tx, circleID, userID int64, role stri
 
 // List returns the circles of a user.
 func (s *Store) List(ctx context.Context, userID int64) ([]Circle, error) {
+	// The operator account sees every circle as administrator without being a member.
 	rows, err := s.pool.Query(ctx, `
-		SELECT c.id, c.name, m.role, (SELECT count(*) FROM circle_members WHERE circle_id = c.id)
-		FROM circles c JOIN circle_members m ON m.circle_id = c.id AND m.user_id = $1
+		SELECT c.id, c.name, CASE WHEN u.is_admin THEN 'admin' ELSE m.role END,
+		       (SELECT count(*) FROM circle_members WHERE circle_id = c.id)
+		FROM users u
+		CROSS JOIN circles c
+		LEFT JOIN circle_members m ON m.circle_id = c.id AND m.user_id = u.id
+		WHERE u.id = $1 AND (u.is_admin OR m.user_id IS NOT NULL)
 		ORDER BY c.name, c.id`, userID)
 	if err != nil {
 		return nil, err
@@ -167,7 +195,7 @@ func (s *Store) List(ctx context.Context, userID int64) ([]Circle, error) {
 
 // Get returns a circle with members, persons and, for administrators, the invite.
 func (s *Store) Get(ctx context.Context, userID, circleID int64) (Detail, error) {
-	r, err := role(ctx, s.pool, circleID, userID)
+	r, err := actorRole(ctx, s.pool, circleID, userID)
 	if err != nil {
 		return Detail{}, err
 	}
@@ -246,7 +274,7 @@ func (s *Store) load(ctx context.Context, circleID int64, r string) (Detail, err
 
 // Delete removes a circle. Only administrators may.
 func (s *Store) Delete(ctx context.Context, userID, circleID int64) error {
-	r, err := role(ctx, s.pool, circleID, userID)
+	r, err := actorRole(ctx, s.pool, circleID, userID)
 	if err != nil {
 		return err
 	}
@@ -267,7 +295,7 @@ func (s *Store) RemoveMember(ctx context.Context, actorID, circleID, targetID in
 	}
 	defer tx.Rollback(ctx)
 
-	ar, err := role(ctx, tx, circleID, actorID)
+	ar, err := actorRole(ctx, tx, circleID, actorID)
 	if err != nil {
 		return err
 	}
@@ -337,7 +365,7 @@ func (s *Store) CreateInvite(ctx context.Context, userID, circleID int64) (Invit
 		return Invite{}, err
 	}
 	defer tx.Rollback(ctx)
-	r, err := role(ctx, tx, circleID, userID)
+	r, err := actorRole(ctx, tx, circleID, userID)
 	if err != nil {
 		return Invite{}, err
 	}
@@ -362,7 +390,7 @@ func (s *Store) CreateInvite(ctx context.Context, userID, circleID int64) (Invit
 
 // RevokeInvite switches the invite link of a circle off.
 func (s *Store) RevokeInvite(ctx context.Context, userID, circleID int64) error {
-	r, err := role(ctx, s.pool, circleID, userID)
+	r, err := actorRole(ctx, s.pool, circleID, userID)
 	if err != nil {
 		return err
 	}
@@ -418,7 +446,7 @@ func personInfo(ctx context.Context, q querier, personID int64) (circleID int64,
 // canManage reports whether the user is a guardian of the person or an
 // administrator of its circle.
 func canManage(ctx context.Context, q querier, personID, circleID, userID int64) (bool, error) {
-	r, err := role(ctx, q, circleID, userID)
+	r, err := actorRole(ctx, q, circleID, userID)
 	if err != nil {
 		return false, err
 	}
@@ -445,15 +473,24 @@ func (s *Store) CreatePerson(ctx context.Context, userID, circleID int64, name, 
 		return Person{}, err
 	}
 	defer tx.Rollback(ctx)
-	if _, err := role(ctx, tx, circleID, userID); err != nil {
+	if _, err := actorRole(ctx, tx, circleID, userID); err != nil {
+		return Person{}, err
+	}
+	operator, err := isOperator(ctx, tx, userID)
+	if err != nil {
 		return Person{}, err
 	}
 	p := Person{Name: name, Guardians: []int64{userID}, Birthday: strings.TrimSpace(birthday)}
+	if operator {
+		p.Guardians = []int64{} // the operator account is no guardian; guardians are added afterwards
+	}
 	if err := tx.QueryRow(ctx, `INSERT INTO persons (circle_id, name, birthday, created_by) VALUES ($1, $2, $3, $4) RETURNING id`, circleID, name, bd, userID).Scan(&p.ID); err != nil {
 		return Person{}, err
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO person_guardians (person_id, user_id) VALUES ($1, $2)`, p.ID, userID); err != nil {
-		return Person{}, err
+	if !operator {
+		if _, err := tx.Exec(ctx, `INSERT INTO person_guardians (person_id, user_id) VALUES ($1, $2)`, p.ID, userID); err != nil {
+			return Person{}, err
+		}
 	}
 	return p, tx.Commit(ctx)
 }
@@ -566,9 +603,9 @@ func (s *Store) GetPerson(ctx context.Context, userID, personID int64) (PersonDe
 		       c.id, c.name
 		FROM persons p
 		JOIN circles c ON c.id = p.circle_id
-		JOIN circle_members m ON m.circle_id = c.id AND m.user_id = $2
+		LEFT JOIN circle_members m ON m.circle_id = c.id AND m.user_id = $2
 		LEFT JOIN users ON users.id = p.user_id
-		WHERE p.id = $1`, personID, userID).
+		WHERE p.id = $1 AND (m.user_id IS NOT NULL OR EXISTS (SELECT 1 FROM users o WHERE o.id = $2 AND o.is_admin))`, personID, userID).
 		Scan(&d.ID, &d.Name, &d.UserID, &d.Guardians, &d.Birthday, &d.FavoriteColor, &d.CircleID, &d.CircleName)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return d, ErrNotFound

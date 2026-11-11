@@ -3,6 +3,7 @@
   import { api } from '../api.svelte.js';
   import { t } from '../i18n.svelte.js';
 
+  let { me } = $props();
   let circles = $state(null);
   let name = $state('');
   let error = $state('');
@@ -46,6 +47,7 @@
     </div>
   {/if}
 
+  {#if !me.is_admin}
   <form class="card" onsubmit={create}>
     <label class="field">
       <span>{t('newCircle')}</span>
@@ -53,5 +55,6 @@
     </label>
     <button disabled={!name.trim()}>{t('create')}</button>
   </form>
+  {/if}
 {/if}
 {#if error}<p class="error">{error}</p>{/if}

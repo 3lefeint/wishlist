@@ -153,7 +153,7 @@
         </div>
       </div>
       <div class="row" style="margin-top: 0.5rem">
-        {#if !person.is_self && g.active && !g.claim}
+        {#if !person.is_self && !me.is_admin && g.active && !g.claim}
           <button onclick={() => claim(g)}>{t('claim')}</button>
         {/if}
         {#if g.claim?.user_id === me.id}

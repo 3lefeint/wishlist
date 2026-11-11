@@ -10,7 +10,9 @@ import (
 
 func (s *Server) adminContentRoutes(mux *http.ServeMux) {
 	mux.Handle("GET /api/admin/circles", s.admin(s.adminListCircles))
+	mux.Handle("POST /api/admin/circles", s.admin(s.adminCreateCircle))
 	mux.Handle("GET /api/admin/circles/{id}", s.admin(s.adminGetCircle))
+	mux.Handle("PUT /api/admin/circles/{id}", s.admin(s.adminRenameCircle))
 	mux.Handle("DELETE /api/admin/circles/{id}", s.admin(s.adminDeleteCircle))
 	mux.Handle("POST /api/admin/circles/{id}/members", s.admin(s.adminAddMember))
 	mux.Handle("PUT /api/admin/circles/{id}/members/{userID}", s.admin(s.adminSetRole))
@@ -27,6 +29,38 @@ func (s *Server) adminListCircles(w http.ResponseWriter, r *http.Request, _ user
 		return
 	}
 	writeJSON(w, http.StatusOK, list)
+}
+
+func (s *Server) adminCreateCircle(w http.ResponseWriter, r *http.Request, _ users.User) {
+	var body struct {
+		Name   string `json:"name"`
+		UserID int64  `json:"user_id"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	c, err := s.Circles.AdminCreate(r.Context(), body.Name, body.UserID)
+	if s.circleError(w, err) {
+		return
+	}
+	writeJSON(w, http.StatusCreated, c)
+}
+
+func (s *Server) adminRenameCircle(w http.ResponseWriter, r *http.Request, _ users.User) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var body struct {
+		Name string `json:"name"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	if s.circleError(w, s.Circles.AdminRename(r.Context(), id, body.Name)) {
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) adminGetCircle(w http.ResponseWriter, r *http.Request, _ users.User) {

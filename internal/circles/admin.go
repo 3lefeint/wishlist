@@ -58,7 +58,7 @@ func (s *Store) AdminDelete(ctx context.Context, circleID int64) error {
 
 func validRole(r string) bool { return r == "admin" || r == "member" }
 
-// AdminAddMember adds an approved user to a circle.
+// AdminAddMember adds an approved user to a circle. The operator account cannot be a member.
 func (s *Store) AdminAddMember(ctx context.Context, circleID, userID int64, r string) error {
 	if !validRole(r) {
 		return ErrInvalidRole
@@ -68,14 +68,18 @@ func (s *Store) AdminAddMember(ctx context.Context, circleID, userID int64, r st
 		return err
 	}
 	defer tx.Rollback(ctx)
-	var ok bool
+	var ok, operator bool
 	if err := tx.QueryRow(ctx, `
 		SELECT EXISTS (SELECT 1 FROM circles WHERE id = $1)
-		   AND EXISTS (SELECT 1 FROM users WHERE id = $2 AND status = 'approved')`, circleID, userID).Scan(&ok); err != nil {
+		   AND EXISTS (SELECT 1 FROM users WHERE id = $2 AND status = 'approved'),
+		       EXISTS (SELECT 1 FROM users WHERE id = $2 AND is_admin)`, circleID, userID).Scan(&ok, &operator); err != nil {
 		return err
 	}
 	if !ok {
 		return ErrNotFound
+	}
+	if operator {
+		return ErrOperator
 	}
 	if _, err := role(ctx, tx, circleID, userID); err == nil {
 		return ErrMember
@@ -130,4 +134,39 @@ func (s *Store) AdminRemoveMember(ctx context.Context, circleID, userID int64) e
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+// AdminCreate creates a circle for an approved user, who becomes its administrator. The operator
+// account cannot be that user.
+func (s *Store) AdminCreate(ctx context.Context, name string, ownerID int64) (Circle, error) {
+	name, err := cleanName(name)
+	if err != nil {
+		return Circle{}, err
+	}
+	var approved, operator bool
+	if err := s.pool.QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM users WHERE id = $1 AND status = 'approved'),
+		       EXISTS (SELECT 1 FROM users WHERE id = $1 AND is_admin)`, ownerID).Scan(&approved, &operator); err != nil {
+		return Circle{}, err
+	}
+	if !approved {
+		return Circle{}, ErrNotFound
+	}
+	if operator {
+		return Circle{}, ErrOperator
+	}
+	return s.Create(ctx, ownerID, name)
+}
+
+// AdminRename renames a circle.
+func (s *Store) AdminRename(ctx context.Context, circleID int64, name string) error {
+	name, err := cleanName(name)
+	if err != nil {
+		return err
+	}
+	tag, err := s.pool.Exec(ctx, `UPDATE circles SET name = $2 WHERE id = $1`, circleID, name)
+	if err == nil && tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return err
 }

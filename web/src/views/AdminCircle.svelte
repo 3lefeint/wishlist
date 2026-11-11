@@ -36,7 +36,7 @@
     return r.kind === 'ok';
   }
 
-  const free = $derived(candidates.filter((u) => !circle?.members.some((m) => m.user_id === u.id)));
+  const free = $derived(candidates.filter((u) => !u.is_admin && !circle?.members.some((m) => m.user_id === u.id)));
 
   async function addMember(e) {
     e.preventDefault();
@@ -46,6 +46,11 @@
   const removeMember = (m) => confirm(t('confirmRemove', { name: m.name })) && act(api.del(`/api/admin/circles/${id}/members/${m.user_id}`));
   const toggle = (g) => act(api.put(`/api/admin/gifts/${g.id}/active`, { active: !g.active }));
   const removeGift = (g) => confirm(t('confirmDeleteGift')) && act(api.del(`/api/admin/gifts/${g.id}`));
+
+  async function rename() {
+    const name = prompt(t('renameCircle'), circle.name);
+    if (name?.trim()) await act(api.put(`/api/admin/circles/${id}`, { name }));
+  }
 
   async function removeCircle() {
     if (!confirm(t('confirmDeleteCircle', { name: circle.name }))) return;
@@ -75,7 +80,11 @@
   <p><a href="#/admin/circles">{t('backToCircles')}</a></p>
   <div class="row between">
     <h1>{circle.name}</h1>
-    <button class="danger small" onclick={removeCircle}>{t('deleteCircle')}</button>
+    <span class="row">
+      <a href={`#/circles/${id}`}>{t('openCircle')}</a>
+      <button class="secondary small" onclick={rename}>{t('rename')}</button>
+      <button class="danger small" onclick={removeCircle}>{t('deleteCircle')}</button>
+    </span>
   </div>
   {#if error}<p class="error">{error}</p>{/if}
 
