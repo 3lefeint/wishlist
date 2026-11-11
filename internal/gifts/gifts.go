@@ -177,7 +177,7 @@ func (s *Store) List(ctx context.Context, viewer, personID int64) ([]Gift, error
 
 	rows, err := s.pool.Query(ctx, `
 		SELECT g.id, g.title, g.comment, g.url, g.has_image, g.active, g.created_by, g.created_at,
-		       c.user_id, COALESCE(NULLIF(u.display_name, ''), split_part(u.email, '@', 1))
+		       c.user_id, COALESCE(NULLIF(btrim(u.first_name || ' ' || u.last_name), ''), split_part(u.email, '@', 1))
 		FROM gifts g
 		LEFT JOIN claims c ON c.gift_id = g.id
 		LEFT JOIN users u ON u.id = c.user_id

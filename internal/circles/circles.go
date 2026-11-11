@@ -53,19 +53,31 @@ type Circle struct {
 
 // Member is a user in a circle.
 type Member struct {
-	UserID int64  `json:"user_id"`
-	Name   string `json:"name"`
-	Email  string `json:"email"`
-	Role   string `json:"role"`
+	UserID        int64  `json:"user_id"`
+	Name          string `json:"name"`
+	Email         string `json:"email"`
+	Role          string `json:"role"`
+	Birthday      string `json:"birthday"`
+	FavoriteColor string `json:"favorite_color"`
 }
 
 // Person owns a gift list.
 type Person struct {
-	ID        int64   `json:"id"`
-	Name      string  `json:"name"`
-	UserID    *int64  `json:"user_id"`
-	Guardians []int64 `json:"guardians"`
+	ID            int64   `json:"id"`
+	Name          string  `json:"name"`
+	UserID        *int64  `json:"user_id"`
+	Guardians     []int64 `json:"guardians"`
+	Birthday      string  `json:"birthday"`
+	FavoriteColor string  `json:"favorite_color"`
 }
+
+// personBirthday and personColor take the values of the linked user for a
+// person with an account, the person's own birthday otherwise. Both expect the
+// persons table as p and a left join of the users table.
+var (
+	personBirthday = users.DateExpr("CASE WHEN p.user_id IS NULL THEN p.birthday ELSE users.birthday END")
+	personColor    = "COALESCE(users.favorite_color, '')"
+)
 
 // Invite is the current invite link of a circle.
 type Invite struct {
@@ -166,7 +178,7 @@ func (s *Store) Get(ctx context.Context, userID, circleID int64) (Detail, error)
 	}
 
 	rows, err := s.pool.Query(ctx, `
-		SELECT u.id, `+users.NameExpr+`, u.email, m.role
+		SELECT u.id, `+users.NameExpr+`, u.email, m.role, `+users.DateExpr("u.birthday")+`, u.favorite_color
 		FROM circle_members m JOIN users u ON u.id = m.user_id
 		WHERE m.circle_id = $1 ORDER BY m.joined_at, u.id`, circleID)
 	if err != nil {
@@ -175,7 +187,7 @@ func (s *Store) Get(ctx context.Context, userID, circleID int64) (Detail, error)
 	d.Members = []Member{}
 	for rows.Next() {
 		var m Member
-		if err := rows.Scan(&m.UserID, &m.Name, &m.Email, &m.Role); err != nil {
+		if err := rows.Scan(&m.UserID, &m.Name, &m.Email, &m.Role, &m.Birthday, &m.FavoriteColor); err != nil {
 			rows.Close()
 			return d, err
 		}
@@ -186,7 +198,8 @@ func (s *Store) Get(ctx context.Context, userID, circleID int64) (Detail, error)
 
 	prow, err := s.pool.Query(ctx, `
 		SELECT p.id, CASE WHEN p.user_id IS NULL THEN p.name ELSE `+users.NameExpr+` END, p.user_id,
-		       COALESCE((SELECT array_agg(g.user_id ORDER BY g.user_id) FROM person_guardians g WHERE g.person_id = p.id), '{}')
+		       COALESCE((SELECT array_agg(g.user_id ORDER BY g.user_id) FROM person_guardians g WHERE g.person_id = p.id), '{}'),
+		       `+personBirthday+`, `+personColor+`
 		FROM persons p LEFT JOIN users ON users.id = p.user_id
 		WHERE p.circle_id = $1 ORDER BY p.user_id IS NULL, lower(CASE WHEN p.user_id IS NULL THEN p.name ELSE `+users.NameExpr+` END), p.id`, circleID)
 	if err != nil {
@@ -196,7 +209,7 @@ func (s *Store) Get(ctx context.Context, userID, circleID int64) (Detail, error)
 	d.Persons = []Person{}
 	for prow.Next() {
 		var p Person
-		if err := prow.Scan(&p.ID, &p.Name, &p.UserID, &p.Guardians); err != nil {
+		if err := prow.Scan(&p.ID, &p.Name, &p.UserID, &p.Guardians, &p.Birthday, &p.FavoriteColor); err != nil {
 			return d, err
 		}
 		d.Persons = append(d.Persons, p)
@@ -403,8 +416,12 @@ func canManage(ctx context.Context, q querier, personID, circleID, userID int64)
 }
 
 // CreatePerson adds a person without an account; the creator is the first guardian.
-func (s *Store) CreatePerson(ctx context.Context, userID, circleID int64, name string) (Person, error) {
+func (s *Store) CreatePerson(ctx context.Context, userID, circleID int64, name, birthday string) (Person, error) {
 	name, err := cleanName(name)
+	if err != nil {
+		return Person{}, err
+	}
+	bd, err := users.ParseBirthday(birthday)
 	if err != nil {
 		return Person{}, err
 	}
@@ -416,8 +433,8 @@ func (s *Store) CreatePerson(ctx context.Context, userID, circleID int64, name s
 	if _, err := role(ctx, tx, circleID, userID); err != nil {
 		return Person{}, err
 	}
-	p := Person{Name: name, Guardians: []int64{userID}}
-	if err := tx.QueryRow(ctx, `INSERT INTO persons (circle_id, name, created_by) VALUES ($1, $2, $3) RETURNING id`, circleID, name, userID).Scan(&p.ID); err != nil {
+	p := Person{Name: name, Guardians: []int64{userID}, Birthday: strings.TrimSpace(birthday)}
+	if err := tx.QueryRow(ctx, `INSERT INTO persons (circle_id, name, birthday, created_by) VALUES ($1, $2, $3, $4) RETURNING id`, circleID, name, bd, userID).Scan(&p.ID); err != nil {
 		return Person{}, err
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO person_guardians (person_id, user_id) VALUES ($1, $2)`, p.ID, userID); err != nil {
@@ -426,9 +443,14 @@ func (s *Store) CreatePerson(ctx context.Context, userID, circleID int64, name s
 	return p, tx.Commit(ctx)
 }
 
-// RenamePerson renames a person without an account.
-func (s *Store) RenamePerson(ctx context.Context, userID, personID int64, name string) error {
+// UpdatePerson changes name and birthday of a person without an account; an
+// empty birthday clears it.
+func (s *Store) UpdatePerson(ctx context.Context, userID, personID int64, name, birthday string) error {
 	name, err := cleanName(name)
+	if err != nil {
+		return err
+	}
+	bd, err := users.ParseBirthday(birthday)
 	if err != nil {
 		return err
 	}
@@ -446,7 +468,7 @@ func (s *Store) RenamePerson(ctx context.Context, userID, personID int64, name s
 	if linked != nil {
 		return ErrLinked
 	}
-	_, err = s.pool.Exec(ctx, `UPDATE persons SET name = $2 WHERE id = $1`, personID, name)
+	_, err = s.pool.Exec(ctx, `UPDATE persons SET name = $2, birthday = $3 WHERE id = $1`, personID, name, bd)
 	return err
 }
 
@@ -525,13 +547,14 @@ func (s *Store) GetPerson(ctx context.Context, userID, personID int64) (PersonDe
 	err := s.pool.QueryRow(ctx, `
 		SELECT p.id, CASE WHEN p.user_id IS NULL THEN p.name ELSE `+users.NameExpr+` END, p.user_id,
 		       COALESCE((SELECT array_agg(g.user_id ORDER BY g.user_id) FROM person_guardians g WHERE g.person_id = p.id), '{}'),
+		       `+personBirthday+`, `+personColor+`,
 		       c.id, c.name
 		FROM persons p
 		JOIN circles c ON c.id = p.circle_id
 		JOIN circle_members m ON m.circle_id = c.id AND m.user_id = $2
 		LEFT JOIN users ON users.id = p.user_id
 		WHERE p.id = $1`, personID, userID).
-		Scan(&d.ID, &d.Name, &d.UserID, &d.Guardians, &d.CircleID, &d.CircleName)
+		Scan(&d.ID, &d.Name, &d.UserID, &d.Guardians, &d.Birthday, &d.FavoriteColor, &d.CircleID, &d.CircleName)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return d, ErrNotFound
 	}

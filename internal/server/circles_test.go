@@ -143,12 +143,37 @@ func TestCircleFlow(t *testing.T) {
 		}
 	}
 
-	// display name shows up for members
-	if code, _ := call(t, ts, bob, "PUT", "/api/me", `{"name":"Bobby"}`); code != 200 {
-		t.Fatalf("set name = %d", code)
+	// profile shows up for members
+	for _, bad := range []string{
+		`{"first_name":"","last_name":"Bobby","birthday":"1990-05-17"}`,
+		`{"first_name":"Bob","last_name":"","birthday":"1990-05-17"}`,
+		`{"first_name":"Bob","last_name":"Bobby","birthday":""}`,
+		`{"first_name":"Bob","last_name":"Bobby","birthday":"2999-01-01"}`,
+		`{"first_name":"Bob","last_name":"Bobby","birthday":"1990-05-17","favorite_color":"red"}`,
+	} {
+		if code, _ := call(t, ts, bob, "PUT", "/api/me", bad); code != 400 {
+			t.Fatalf("invalid profile %s = %d, want 400", bad, code)
+		}
 	}
-	if _, body := call(t, ts, alice, "GET", path, ""); !strings.Contains(body, "Bobby") {
-		t.Fatalf("display name missing: %s", body)
+	if code, body := call(t, ts, bob, "PUT", "/api/me", `{"first_name":"Bob","last_name":"Bobby","birthday":"1990-05-17","favorite_color":"#3A7BD5"}`); code != 200 || !strings.Contains(body, `"profile_complete":true`) {
+		t.Fatalf("set profile = %d %s", code, body)
+	}
+	if _, body := call(t, ts, alice, "GET", path, ""); !strings.Contains(body, "Bob Bobby") || !strings.Contains(body, `"birthday":"1990-05-17"`) || !strings.Contains(body, `"favorite_color":"#3a7bd5"`) {
+		t.Fatalf("profile missing: %s", body)
+	}
+
+	// birthday of a person without an account is optional
+	if _, body := call(t, ts, alice, "GET", path, ""); !strings.Contains(body, `"name":"Emmi","user_id":null,"guardians":[`+aID+`,`+bID+`],"birthday":""`) {
+		t.Fatalf("person without birthday: %s", body)
+	}
+	if code, _ := call(t, ts, alice, "PUT", "/api/persons/"+pid, `{"name":"Emmi","birthday":"nope"}`); code != 400 {
+		t.Fatalf("invalid person birthday = %d, want 400", code)
+	}
+	if code, _ := call(t, ts, alice, "PUT", "/api/persons/"+pid, `{"name":"Emmi","birthday":"2015-03-02"}`); code != 204 {
+		t.Fatalf("set person birthday = %d", code)
+	}
+	if _, body := call(t, ts, alice, "GET", path, ""); !strings.Contains(body, `"birthday":"2015-03-02"`) {
+		t.Fatalf("person birthday missing: %s", body)
 	}
 
 	// leaving: the only administrator cannot leave while others remain
@@ -164,7 +189,7 @@ func TestCircleFlow(t *testing.T) {
 	if code, _ := call(t, ts, bob, "GET", path, ""); code != 404 {
 		t.Fatalf("left member get = %d, want 404", code)
 	}
-	if _, body := call(t, ts, alice, "GET", path, ""); strings.Contains(body, "Bobby") || strings.Contains(body, `"guardians":[`+aID+`,`+bID+`]`) {
+	if _, body := call(t, ts, alice, "GET", path, ""); strings.Contains(body, "Bob Bobby") || strings.Contains(body, `"guardians":[`+aID+`,`+bID+`]`) {
 		t.Fatalf("leaver's person entry and guardianship must be gone: %s", body)
 	}
 

@@ -12,3 +12,4 @@
 - Circles with invite links, members and persons without an account, with display names and guardians
 - Gifts with tags, one downscaled image, claims and deactivation
 - Admin page to approve, block and delete users, with a badge for waiting registrations
+- Profile with first name, last name, birthday and favourite colour, asked after the first sign-in and shown to circle members; optional birthday for persons without an account (#11)

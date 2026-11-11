@@ -4,7 +4,10 @@ package users
 import (
 	"context"
 	"errors"
+	"regexp"
 	"strings"
+	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -26,7 +29,14 @@ type User struct {
 	Email   string `json:"email"`
 	Status  string `json:"status"`
 	IsAdmin bool   `json:"is_admin"`
-	Name    string `json:"name"`
+	// Name is the full name, or the part of the e-mail address before the at
+	// sign while the profile is empty.
+	Name            string `json:"name"`
+	FirstName       string `json:"first_name"`
+	LastName        string `json:"last_name"`
+	Birthday        string `json:"birthday"`
+	FavoriteColor   string `json:"favorite_color"`
+	ProfileComplete bool   `json:"profile_complete"`
 }
 
 // Store reads and writes users.
@@ -53,15 +63,26 @@ func Normalize(email string) string {
 	return strings.ToLower(strings.TrimSpace(email))
 }
 
-// NameExpr is the display name of a user: the chosen name or the part of the
-// e-mail address before the at sign.
-const NameExpr = "COALESCE(NULLIF(display_name, ''), split_part(email, '@', 1))"
+// NameExpr is the display name of a user: first and last name or the part of
+// the e-mail address before the at sign.
+const NameExpr = "COALESCE(NULLIF(btrim(first_name || ' ' || last_name), ''), split_part(email, '@', 1))"
 
-const columns = "id, email, status, is_admin, " + NameExpr
+// DateFormat is the layout of a birthday in the API and the database.
+const DateFormat = "2006-01-02"
+
+// DateExpr renders a nullable date column as DateFormat, empty when null.
+func DateExpr(column string) string {
+	return "COALESCE(to_char(" + column + ", 'YYYY-MM-DD'), '')"
+}
+
+var columns = "id, email, status, is_admin, " + NameExpr +
+	", first_name, last_name, " + DateExpr("birthday") + ", favorite_color"
 
 func scan(row pgx.Row) (User, error) {
 	var u User
-	err := row.Scan(&u.ID, &u.Email, &u.Status, &u.IsAdmin, &u.Name)
+	err := row.Scan(&u.ID, &u.Email, &u.Status, &u.IsAdmin, &u.Name,
+		&u.FirstName, &u.LastName, &u.Birthday, &u.FavoriteColor)
+	u.ProfileComplete = u.FirstName != "" && u.LastName != "" && u.Birthday != ""
 	return u, err
 }
 
@@ -111,8 +132,35 @@ var (
 	ErrNotFound      = errors.New("user not found")
 	ErrAdmin         = errors.New("administrators cannot be changed")
 	ErrInvalidStatus = errors.New("invalid status")
-	ErrInvalidName   = errors.New("name too long")
+	ErrInvalidName   = errors.New("invalid name")
+	ErrInvalidDate   = errors.New("invalid birthday")
+	ErrInvalidColor  = errors.New("invalid colour")
 )
+
+var colorRE = regexp.MustCompile(`^#[0-9a-f]{6}$`)
+
+// ParseBirthday validates an optional birthday. An empty string means none
+// (nil). A date must not lie in the future or before 1900.
+func ParseBirthday(s string) (*time.Time, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil, nil
+	}
+	d, err := time.Parse(DateFormat, s)
+	if err != nil || d.Year() < 1900 || d.After(time.Now().AddDate(0, 0, 1)) {
+		return nil, ErrInvalidDate
+	}
+	return &d, nil
+}
+
+// Profile is what a user enters about themselves. First name, last name and
+// birthday are required, the colour is optional.
+type Profile struct {
+	FirstName     string `json:"first_name"`
+	LastName      string `json:"last_name"`
+	Birthday      string `json:"birthday"`
+	FavoriteColor string `json:"favorite_color"`
+}
 
 // List returns users ordered by registration, optionally filtered by status.
 func (s *Store) List(ctx context.Context, status string) ([]User, error) {
@@ -148,14 +196,28 @@ func (s *Store) SetStatus(ctx context.Context, id int64, status string) (User, e
 	return u, err
 }
 
-// SetName sets the display name of a user; an empty name resets it.
-func (s *Store) SetName(ctx context.Context, id int64, name string) (User, error) {
-	name = strings.TrimSpace(name)
-	if len([]rune(name)) > 80 {
-		return User{}, ErrInvalidName
+// SetProfile stores the profile of a user.
+func (s *Store) SetProfile(ctx context.Context, id int64, p Profile) (User, error) {
+	first, last := strings.TrimSpace(p.FirstName), strings.TrimSpace(p.LastName)
+	for _, n := range []string{first, last} {
+		if n == "" || utf8.RuneCountInString(n) > 80 {
+			return User{}, ErrInvalidName
+		}
+	}
+	birthday, err := ParseBirthday(p.Birthday)
+	if err != nil {
+		return User{}, err
+	}
+	if birthday == nil {
+		return User{}, ErrInvalidDate
+	}
+	color := strings.ToLower(strings.TrimSpace(p.FavoriteColor))
+	if color != "" && !colorRE.MatchString(color) {
+		return User{}, ErrInvalidColor
 	}
 	return scan(s.pool.QueryRow(ctx,
-		`UPDATE users SET display_name = $2 WHERE id = $1 RETURNING `+columns, id, name))
+		`UPDATE users SET first_name = $2, last_name = $3, birthday = $4, favorite_color = $5
+		 WHERE id = $1 RETURNING `+columns, id, first, last, birthday, color))
 }
 
 // Delete removes a user. Administrators are left alone. Circles that would be
