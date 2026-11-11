@@ -199,10 +199,22 @@ func (s *Server) setProfile(w http.ResponseWriter, r *http.Request, u users.User
 	writeJSON(w, http.StatusOK, updated)
 }
 
-// member lets only approved users through.
+// member lets only approved users through. The operator account passes too: it acts on every
+// circle as administrator without being a member.
 func (s *Server) member(next func(http.ResponseWriter, *http.Request, users.User)) http.Handler {
 	return s.signedIn(func(w http.ResponseWriter, r *http.Request, u users.User) {
 		if u.Status != users.StatusApproved {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		next(w, r, u)
+	})
+}
+
+// memberOnly is member without the operator account, for routes that would make the caller a member.
+func (s *Server) memberOnly(next func(http.ResponseWriter, *http.Request, users.User)) http.Handler {
+	return s.member(func(w http.ResponseWriter, r *http.Request, u users.User) {
+		if u.IsAdmin {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}

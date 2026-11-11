@@ -118,29 +118,34 @@ type access struct {
 	active     bool
 	hasImage   bool
 	admin      bool
+	operator   bool // the operator account acts on every gift without being a circle member
 	viewer     int64
 }
 
 func (a access) isCreator() bool { return a.creator != nil && *a.creator == a.viewer }
+
+// mayEdit reports whether the viewer may change the gift: its creator or the operator account.
+func (a access) mayEdit() bool   { return a.isCreator() || a.operator }
 func (a access) isClaimer() bool { return a.claimer != nil && *a.claimer == a.viewer }
 func (a access) isOwnList() bool { return a.personUser != nil && *a.personUser == a.viewer }
 
 func (s *Store) access(ctx context.Context, q pgx.Tx, giftID, viewer int64) (access, error) {
 	a := access{viewer: viewer}
-	var role string
+	var role *string
 	err := q.QueryRow(ctx, `
-		SELECT g.circle_id, g.person_id, p.user_id, g.created_by, c.user_id, g.active, g.has_image, m.role
+		SELECT g.circle_id, g.person_id, p.user_id, g.created_by, c.user_id, g.active, g.has_image, m.role, op.id IS NOT NULL
 		FROM gifts g
 		JOIN persons p ON p.id = g.person_id
-		JOIN circle_members m ON m.circle_id = g.circle_id AND m.user_id = $2
+		LEFT JOIN circle_members m ON m.circle_id = g.circle_id AND m.user_id = $2
+		LEFT JOIN users op ON op.id = $2 AND op.is_admin
 		LEFT JOIN claims c ON c.gift_id = g.id
-		WHERE g.id = $1 FOR UPDATE OF g`, giftID, viewer).
-		Scan(&a.circleID, &a.personID, &a.personUser, &a.creator, &a.claimer, &a.active, &a.hasImage, &role)
+		WHERE g.id = $1 AND (m.user_id IS NOT NULL OR op.id IS NOT NULL) FOR UPDATE OF g`, giftID, viewer).
+		Scan(&a.circleID, &a.personID, &a.personUser, &a.creator, &a.claimer, &a.active, &a.hasImage, &role, &a.operator)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return a, ErrNotFound
 	}
-	a.admin = role == "admin"
-	if err == nil && !a.active && !a.isCreator() && !a.isClaimer() {
+	a.admin = a.operator || (role != nil && *role == "admin")
+	if err == nil && !a.active && !a.mayEdit() && !a.isClaimer() {
 		return a, ErrNotFound
 	}
 	return a, err
@@ -162,18 +167,21 @@ func (s *Store) inTx(ctx context.Context, fn func(pgx.Tx) error) error {
 func (s *Store) List(ctx context.Context, viewer, personID int64) ([]Gift, error) {
 	var circleID int64
 	var personUser *int64
-	var admin bool
+	var admin, operator bool
 	err := s.pool.QueryRow(ctx, `
-		SELECT p.circle_id, p.user_id, m.role = 'admin'
-		FROM persons p JOIN circle_members m ON m.circle_id = p.circle_id AND m.user_id = $2
-		WHERE p.id = $1`, personID, viewer).Scan(&circleID, &personUser, &admin)
+		SELECT p.circle_id, p.user_id, COALESCE(m.role = 'admin', false) OR op.id IS NOT NULL, op.id IS NOT NULL
+		FROM persons p
+		LEFT JOIN circle_members m ON m.circle_id = p.circle_id AND m.user_id = $2
+		LEFT JOIN users op ON op.id = $2 AND op.is_admin
+		WHERE p.id = $1 AND (m.user_id IS NOT NULL OR op.id IS NOT NULL)`, personID, viewer).Scan(&circleID, &personUser, &admin, &operator)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	hideClaims := personUser != nil && *personUser == viewer
+	// Claims stay hidden from the person the list is for and from the operator account.
+	hideClaims := operator || (personUser != nil && *personUser == viewer)
 
 	rows, err := s.pool.Query(ctx, `
 		SELECT g.id, g.title, g.comment, g.url, g.has_image, g.active, g.created_by, g.created_at,
@@ -181,8 +189,8 @@ func (s *Store) List(ctx context.Context, viewer, personID int64) ([]Gift, error
 		FROM gifts g
 		LEFT JOIN claims c ON c.gift_id = g.id
 		LEFT JOIN users u ON u.id = c.user_id
-		WHERE g.person_id = $1 AND (g.active OR g.created_by = $2 OR c.user_id = $2)
-		ORDER BY g.active DESC, g.created_at DESC, g.id DESC`, personID, viewer)
+		WHERE g.person_id = $1 AND (g.active OR g.created_by = $2 OR c.user_id = $2 OR $3)
+		ORDER BY g.active DESC, g.created_at DESC, g.id DESC`, personID, viewer, operator)
 	if err != nil {
 		return nil, err
 	}
@@ -198,7 +206,7 @@ func (s *Store) List(ctx context.Context, viewer, personID int64) ([]Gift, error
 			return nil, err
 		}
 		mine := creator != nil && *creator == viewer
-		g.CanEdit = mine
+		g.CanEdit = mine || operator
 		g.CanDelete = mine || admin
 		if claimUser != nil && !hideClaims {
 			g.Claim = &Claimer{UserID: *claimUser, Name: *claimName}
@@ -230,7 +238,7 @@ func (s *Store) List(ctx context.Context, viewer, personID int64) ([]Gift, error
 	return out, trows.Err()
 }
 
-// Create adds a gift to a person's list. Any circle member may.
+// Create adds a gift to a person's list. Any circle member and the operator account may.
 func (s *Store) Create(ctx context.Context, viewer, personID int64, in Input) (int64, error) {
 	if err := in.clean(); err != nil {
 		return 0, err
@@ -240,8 +248,9 @@ func (s *Store) Create(ctx context.Context, viewer, personID int64, in Input) (i
 		var circleID int64
 		err := tx.QueryRow(ctx, `
 			SELECT p.circle_id FROM persons p
-			JOIN circle_members m ON m.circle_id = p.circle_id AND m.user_id = $2
-			WHERE p.id = $1`, personID, viewer).Scan(&circleID)
+			LEFT JOIN circle_members m ON m.circle_id = p.circle_id AND m.user_id = $2
+			LEFT JOIN users op ON op.id = $2 AND op.is_admin
+			WHERE p.id = $1 AND (m.user_id IS NOT NULL OR op.id IS NOT NULL)`, personID, viewer).Scan(&circleID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
 		}
@@ -259,7 +268,7 @@ func (s *Store) Create(ctx context.Context, viewer, personID int64, in Input) (i
 	return id, err
 }
 
-// Update changes title, comment, link and tags. Only the creator may.
+// Update changes title, comment, link and tags. The creator and the operator account may.
 func (s *Store) Update(ctx context.Context, viewer, giftID int64, in Input) error {
 	if err := in.clean(); err != nil {
 		return err
@@ -269,7 +278,7 @@ func (s *Store) Update(ctx context.Context, viewer, giftID int64, in Input) erro
 		if err != nil {
 			return err
 		}
-		if !a.isCreator() {
+		if !a.mayEdit() {
 			return ErrForbidden
 		}
 		if _, err := tx.Exec(ctx, `
@@ -281,7 +290,7 @@ func (s *Store) Update(ctx context.Context, viewer, giftID int64, in Input) erro
 	})
 }
 
-// SetActive deactivates or reactivates a gift. Only the creator may. A claim
+// SetActive deactivates or reactivates a gift. The creator and the operator account may. A claim
 // stays; the claimer still sees the gift.
 func (s *Store) SetActive(ctx context.Context, viewer, giftID int64, active bool) error {
 	return s.inTx(ctx, func(tx pgx.Tx) error {
@@ -289,7 +298,7 @@ func (s *Store) SetActive(ctx context.Context, viewer, giftID int64, active bool
 		if err != nil {
 			return err
 		}
-		if !a.isCreator() {
+		if !a.mayEdit() {
 			return ErrForbidden
 		}
 		_, err = tx.Exec(ctx, `UPDATE gifts SET active = $2, updated_at = now() WHERE id = $1`, giftID, active)
@@ -323,6 +332,9 @@ func (s *Store) Claim(ctx context.Context, viewer, giftID int64) error {
 		if err != nil {
 			return err
 		}
+		if a.operator {
+			return ErrForbidden // the operator account is no circle member and claims nothing
+		}
 		if a.isOwnList() {
 			return ErrOwnList
 		}
@@ -340,14 +352,14 @@ func (s *Store) Claim(ctx context.Context, viewer, giftID int64) error {
 	})
 }
 
-// Unclaim withdraws the viewer's claim.
+// Unclaim withdraws the viewer's claim. The operator account may withdraw any claim.
 func (s *Store) Unclaim(ctx context.Context, viewer, giftID int64) error {
 	return s.inTx(ctx, func(tx pgx.Tx) error {
 		a, err := s.access(ctx, tx, giftID, viewer)
 		if err != nil {
 			return err
 		}
-		if !a.isClaimer() {
+		if !a.isClaimer() && !a.operator {
 			return ErrForbidden
 		}
 		_, err = tx.Exec(ctx, `DELETE FROM claims WHERE gift_id = $1`, giftID)
@@ -365,14 +377,14 @@ func (s *Store) ImageAccess(ctx context.Context, viewer, giftID int64) (hasImage
 	return hasImage, err
 }
 
-// SetImage records that a gift has (or no longer has) an image. Only the creator may.
+// SetImage records that a gift has (or no longer has) an image. The creator and the operator account may.
 func (s *Store) SetImage(ctx context.Context, viewer, giftID int64, has bool) error {
 	return s.inTx(ctx, func(tx pgx.Tx) error {
 		a, err := s.access(ctx, tx, giftID, viewer)
 		if err != nil {
 			return err
 		}
-		if !a.isCreator() {
+		if !a.mayEdit() {
 			return ErrForbidden
 		}
 		_, err = tx.Exec(ctx, `UPDATE gifts SET has_image = $2, updated_at = now() WHERE id = $1`, giftID, has)
@@ -398,10 +410,12 @@ func (s *Store) ImageIDs(ctx context.Context) (map[int64]bool, error) {
 	return ids, rows.Err()
 }
 
-// Tags lists the tags of a circle for a member.
+// Tags lists the tags of a circle for a member or the operator account.
 func (s *Store) Tags(ctx context.Context, viewer, circleID int64) ([]Tag, error) {
 	var ok bool
-	if err := s.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM circle_members WHERE circle_id = $1 AND user_id = $2)`, circleID, viewer).Scan(&ok); err != nil {
+	if err := s.pool.QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM circle_members WHERE circle_id = $1 AND user_id = $2)
+		    OR EXISTS (SELECT 1 FROM circles WHERE id = $1) AND EXISTS (SELECT 1 FROM users WHERE id = $2 AND is_admin)`, circleID, viewer).Scan(&ok); err != nil {
 		return nil, err
 	}
 	if !ok {
