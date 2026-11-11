@@ -26,6 +26,7 @@ type User struct {
 	Email   string `json:"email"`
 	Status  string `json:"status"`
 	IsAdmin bool   `json:"is_admin"`
+	Name    string `json:"name"`
 }
 
 // Store reads and writes users.
@@ -52,11 +53,15 @@ func Normalize(email string) string {
 	return strings.ToLower(strings.TrimSpace(email))
 }
 
-const columns = "id, email, status, is_admin"
+// NameExpr is the display name of a user: the chosen name or the part of the
+// e-mail address before the at sign.
+const NameExpr = "COALESCE(NULLIF(display_name, ''), split_part(email, '@', 1))"
+
+const columns = "id, email, status, is_admin, " + NameExpr
 
 func scan(row pgx.Row) (User, error) {
 	var u User
-	err := row.Scan(&u.ID, &u.Email, &u.Status, &u.IsAdmin)
+	err := row.Scan(&u.ID, &u.Email, &u.Status, &u.IsAdmin, &u.Name)
 	return u, err
 }
 
@@ -106,6 +111,7 @@ var (
 	ErrNotFound      = errors.New("user not found")
 	ErrAdmin         = errors.New("administrators cannot be changed")
 	ErrInvalidStatus = errors.New("invalid status")
+	ErrInvalidName   = errors.New("name too long")
 )
 
 // List returns users ordered by registration, optionally filtered by status.
@@ -142,16 +148,56 @@ func (s *Store) SetStatus(ctx context.Context, id int64, status string) (User, e
 	return u, err
 }
 
-// Delete removes a user. Administrators are left alone.
+// SetName sets the display name of a user; an empty name resets it.
+func (s *Store) SetName(ctx context.Context, id int64, name string) (User, error) {
+	name = strings.TrimSpace(name)
+	if len([]rune(name)) > 80 {
+		return User{}, ErrInvalidName
+	}
+	return scan(s.pool.QueryRow(ctx,
+		`UPDATE users SET display_name = $2 WHERE id = $1 RETURNING `+columns, id, name))
+}
+
+// Delete removes a user. Administrators are left alone. Circles that would be
+// left without an administrator hand the role to their longest-standing member;
+// circles the user was alone in are removed.
 func (s *Store) Delete(ctx context.Context, id int64) error {
-	tag, err := s.pool.Exec(ctx, `DELETE FROM users WHERE id = $1 AND NOT is_admin`, id)
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
-	if tag.RowsAffected() == 0 {
-		return s.missingOrAdmin(ctx, id)
+	defer tx.Rollback(ctx)
+
+	var admin bool
+	if err := tx.QueryRow(ctx, `SELECT is_admin FROM users WHERE id = $1 FOR UPDATE`, id).Scan(&admin); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
 	}
-	return nil
+	if admin {
+		return ErrAdmin
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE circle_members m SET role = 'admin'
+		WHERE (m.circle_id, m.user_id) IN (
+			SELECT DISTINCT ON (o.circle_id) o.circle_id, o.user_id
+			FROM circle_members o
+			WHERE o.user_id <> $1
+			  AND o.circle_id IN (SELECT circle_id FROM circle_members WHERE user_id = $1 AND role = 'admin')
+			  AND NOT EXISTS (SELECT 1 FROM circle_members a WHERE a.circle_id = o.circle_id AND a.user_id <> $1 AND a.role = 'admin')
+			ORDER BY o.circle_id, o.joined_at, o.user_id)`, id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM circles c WHERE EXISTS (SELECT 1 FROM circle_members WHERE circle_id = c.id AND user_id = $1)
+		AND NOT EXISTS (SELECT 1 FROM circle_members WHERE circle_id = c.id AND user_id <> $1)`, id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM users WHERE id = $1`, id); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 func (s *Store) missingOrAdmin(ctx context.Context, id int64) error {

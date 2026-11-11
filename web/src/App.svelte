@@ -1,32 +1,61 @@
 <script>
   import { onMount } from 'svelte';
-  import { getMe } from './api.js';
+  import { api, net } from './api.svelte.js';
   import { i18n, languages, setLang, t } from './i18n.svelte.js';
+  import { router, match } from './router.svelte.js';
+  import Home from './views/Home.svelte';
+  import Circle from './views/Circle.svelte';
+  import Join from './views/Join.svelte';
+  import Profile from './views/Profile.svelte';
 
   let state = $state({ kind: 'loading' });
 
   async function load() {
     state = { kind: 'loading' };
-    state = await getMe();
+    const r = await api.get('/api/me');
+    if (r.kind === 'ok') state = { kind: 'ok', user: r.data };
+    else if (r.kind === 'session') state = { kind: 'session' };
+    else if (r.kind === 'http' && r.status === 503) state = { kind: 'closed' };
+    else state = { kind: 'error' };
   }
 
   onMount(() => {
     document.documentElement.lang = i18n.lang;
     load();
   });
+
+  const route = $derived.by(() => {
+    let p;
+    if (match('/', router.path)) return { view: 'home' };
+    if ((p = match('/circles/:id', router.path))) return { view: 'circle', ...p };
+    if ((p = match('/join/:token', router.path))) return { view: 'join', ...p };
+    if (match('/profile', router.path)) return { view: 'profile' };
+    return { view: 'notfound' };
+  });
 </script>
 
 <header>
-  <strong>{t('appName')}</strong>
-  <label>
-    <span class="sr">{t('language')}</span>
-    <select value={i18n.lang} onchange={(e) => setLang(e.currentTarget.value)}>
-      {#each languages as l}
-        <option value={l}>{l.toUpperCase()}</option>
-      {/each}
-    </select>
-  </label>
+  <a class="brand" href="#/"><strong>{t('appName')}</strong></a>
+  <span class="row">
+    {#if state.kind === 'ok' && state.user.status === 'approved'}
+      <a href="#/profile">{state.user.name}</a>
+    {/if}
+    <label>
+      <span class="sr">{t('language')}</span>
+      <select value={i18n.lang} onchange={(e) => setLang(e.currentTarget.value)}>
+        {#each languages as l}
+          <option value={l}>{l.toUpperCase()}</option>
+        {/each}
+      </select>
+    </label>
+  </span>
 </header>
+
+{#if net.sessionExpired && state.kind === 'ok'}
+  <div class="banner">
+    {t('sessionText')} <button class="small" onclick={() => location.reload()}>{t('reload')}</button>
+  </div>
+{/if}
 
 <main>
   {#if state.kind === 'loading'}
@@ -59,12 +88,16 @@
       <h1>{t('blockedTitle')}</h1>
       <p>{t('blockedText')}</p>
     </section>
+  {:else if route.view === 'home'}
+    <Home />
+  {:else if route.view === 'circle'}
+    {#key route.id}<Circle id={route.id} me={state.user} />{/key}
+  {:else if route.view === 'join'}
+    <Join token={route.token} />
+  {:else if route.view === 'profile'}
+    <Profile me={state.user} onchange={(u) => (state = { kind: 'ok', user: u })} />
   {:else}
-    <section class="card">
-      <h1>{t('welcome')}</h1>
-      <p class="muted">{t('signedInAs', { email: state.user.email })}</p>
-      {#if state.user.is_admin}<p>{t('admin')}</p>{/if}
-    </section>
+    <section class="card"><h1>{t('notFound')}</h1><a href="#/">{t('home')}</a></section>
   {/if}
 </main>
 
@@ -76,24 +109,14 @@
     padding: 0.75rem 1rem;
     border-bottom: 1px solid var(--border);
   }
-  main { max-width: 36rem; margin: 2rem auto; padding: 0 1rem; }
-  .card {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 1.25rem;
-  }
-  h1 { margin-top: 0; font-size: 1.4rem; }
-  .muted { color: var(--muted); }
-  button {
+  .brand { color: inherit; text-decoration: none; }
+  main { max-width: 40rem; margin: 1.5rem auto; padding: 0 1rem; }
+  .banner {
     background: var(--accent);
     color: #fff;
-    border: 0;
-    border-radius: 8px;
     padding: 0.5rem 1rem;
-    font: inherit;
-    cursor: pointer;
+    text-align: center;
   }
-  select { font: inherit; padding: 0.25rem; }
+  .banner button { background: #fff; color: var(--accent); }
   .sr { position: absolute; left: -9999px; }
 </style>
