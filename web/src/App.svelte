@@ -88,6 +88,8 @@
       <p>{t('errorText')}</p>
       <button onclick={load}>{t('retry')}</button>
     </section>
+  {:else if !state.user.profile_complete}
+    <Profile first me={state.user} onchange={(u) => (state = { kind: 'ok', user: u })} />
   {:else if state.user.status === 'pending'}
     <section class="card">
       <h1>{t('pendingTitle')}</h1>

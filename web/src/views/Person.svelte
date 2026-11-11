@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte';
   import { api, uploadImage } from '../api.svelte.js';
-  import { t } from '../i18n.svelte.js';
+  import { formatDate, t } from '../i18n.svelte.js';
 
   let { id, me } = $props();
   let person = $state(null);
@@ -95,7 +95,11 @@
   <p class="muted">{t('loading')}</p>
 {:else}
   <p><a href={`#/circles/${person.circle_id}`}>{t('back', { name: person.circle_name })}</a></p>
-  <h1>{person.name}</h1>
+  <h1>
+    {#if person.favorite_color}<span class="dot" style={`background: ${person.favorite_color}`}></span>{/if}
+    {person.name}
+  </h1>
+  {#if person.birthday}<p class="muted">{t('birthday')}: {formatDate(person.birthday)}</p>{/if}
   {#if person.is_self}<p class="muted">{t('ownList')}</p>{/if}
   {#if error}<p class="error">{error}</p>{/if}
 

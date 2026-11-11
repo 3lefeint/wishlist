@@ -19,7 +19,7 @@ func (s *Server) circleRoutes(mux *http.ServeMux) {
 	mux.Handle("GET /api/invites/{token}", s.member(s.inviteInfo))
 	mux.Handle("POST /api/invites/{token}/join", s.member(s.joinCircle))
 	mux.Handle("POST /api/circles/{id}/persons", s.member(s.createPerson))
-	mux.Handle("PUT /api/persons/{id}", s.member(s.renamePerson))
+	mux.Handle("PUT /api/persons/{id}", s.member(s.updatePerson))
 	mux.Handle("DELETE /api/persons/{id}", s.member(s.deletePerson))
 	mux.Handle("POST /api/persons/{id}/guardians", s.member(s.addGuardian))
 	mux.Handle("DELETE /api/persons/{id}/guardians/{userID}", s.member(s.removeGuardian))
@@ -36,6 +36,8 @@ func (s *Server) circleError(w http.ResponseWriter, err error) bool {
 		http.Error(w, "forbidden", http.StatusForbidden)
 	case errors.Is(err, circles.ErrInvalidName):
 		http.Error(w, "invalid name", http.StatusBadRequest)
+	case errors.Is(err, users.ErrInvalidDate):
+		http.Error(w, "invalid birthday", http.StatusBadRequest)
 	case errors.Is(err, circles.ErrInvite):
 		http.Error(w, "invite link is invalid or expired", http.StatusNotFound)
 	case errors.Is(err, circles.ErrNotMember):
@@ -153,30 +155,32 @@ func (s *Server) createPerson(w http.ResponseWriter, r *http.Request, u users.Us
 		return
 	}
 	var body struct {
-		Name string `json:"name"`
+		Name     string `json:"name"`
+		Birthday string `json:"birthday"`
 	}
 	if !decode(w, r, &body) {
 		return
 	}
-	p, err := s.Circles.CreatePerson(r.Context(), u.ID, id, body.Name)
+	p, err := s.Circles.CreatePerson(r.Context(), u.ID, id, body.Name, body.Birthday)
 	if s.circleError(w, err) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, p)
 }
 
-func (s *Server) renamePerson(w http.ResponseWriter, r *http.Request, u users.User) {
+func (s *Server) updatePerson(w http.ResponseWriter, r *http.Request, u users.User) {
 	id, ok := pathID(w, r)
 	if !ok {
 		return
 	}
 	var body struct {
-		Name string `json:"name"`
+		Name     string `json:"name"`
+		Birthday string `json:"birthday"`
 	}
 	if !decode(w, r, &body) {
 		return
 	}
-	if s.circleError(w, s.Circles.RenamePerson(r.Context(), u.ID, id, body.Name)) {
+	if s.circleError(w, s.Circles.UpdatePerson(r.Context(), u.ID, id, body.Name, body.Birthday)) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

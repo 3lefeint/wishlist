@@ -45,7 +45,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/me", s.signedIn(func(w http.ResponseWriter, r *http.Request, u users.User) {
 		writeJSON(w, http.StatusOK, u)
 	}))
-	mux.Handle("PUT /api/me", s.signedIn(s.setName))
+	mux.Handle("PUT /api/me", s.signedIn(s.setProfile))
 	s.circleRoutes(mux)
 	s.giftRoutes(mux)
 	mux.Handle("GET /api/admin/users", s.admin(s.listUsers))
@@ -181,20 +181,18 @@ func decode(w http.ResponseWriter, r *http.Request, v any) bool {
 	return true
 }
 
-func (s *Server) setName(w http.ResponseWriter, r *http.Request, u users.User) {
-	var body struct {
-		Name string `json:"name"`
-	}
+func (s *Server) setProfile(w http.ResponseWriter, r *http.Request, u users.User) {
+	var body users.Profile
 	if !decode(w, r, &body) {
 		return
 	}
-	updated, err := s.Store.SetName(r.Context(), u.ID, body.Name)
-	if errors.Is(err, users.ErrInvalidName) {
-		http.Error(w, "invalid name", http.StatusBadRequest)
+	updated, err := s.Store.SetProfile(r.Context(), u.ID, body)
+	switch {
+	case errors.Is(err, users.ErrInvalidName), errors.Is(err, users.ErrInvalidDate), errors.Is(err, users.ErrInvalidColor):
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
-	}
-	if err != nil {
-		s.internal(w, "set name", err)
+	case err != nil:
+		s.internal(w, "set profile", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, updated)

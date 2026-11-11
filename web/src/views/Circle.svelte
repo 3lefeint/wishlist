@@ -1,13 +1,14 @@
 <script>
   import { onMount } from 'svelte';
   import { api } from '../api.svelte.js';
-  import { t } from '../i18n.svelte.js';
+  import { formatDate, t } from '../i18n.svelte.js';
 
   let { id, me } = $props();
   let circle = $state(null);
   let missing = $state(false);
   let error = $state('');
   let personName = $state('');
+  let personBirthday = $state('');
   let copied = $state(false);
 
   const isAdmin = $derived(circle?.role === 'admin');
@@ -36,12 +37,19 @@
 
   async function addPerson(e) {
     e.preventDefault();
-    if (await act(api.post(`/api/circles/${id}/persons`, { name: personName }))) personName = '';
+    const body = { name: personName, birthday: personBirthday };
+    if (await act(api.post(`/api/circles/${id}/persons`, body), { 400: t('invalidBirthday') })) {
+      personName = '';
+      personBirthday = '';
+    }
   }
 
   const rename = async (p) => {
     const name = prompt(t('renamePerson'), p.name);
-    if (name?.trim()) await act(api.put(`/api/persons/${p.id}`, { name }));
+    if (!name?.trim()) return;
+    const birthday = prompt(t('birthdayPrompt'), p.birthday);
+    if (birthday === null) return;
+    await act(api.put(`/api/persons/${p.id}`, { name, birthday }), { 400: t('invalidBirthday') });
   };
   const removePerson = async (p) => {
     if (confirm(t('confirmDeletePerson', { name: p.name }))) await act(api.del(`/api/persons/${p.id}`));
@@ -93,7 +101,11 @@
       {#each circle.persons as p (p.id)}
         <li>
           <div class="row between">
-            <a href={`#/persons/${p.id}`}><strong>{p.name}</strong></a>
+            <span>
+              {#if p.favorite_color}<span class="dot" style={`background: ${p.favorite_color}`}></span>{/if}
+              <a href={`#/persons/${p.id}`}><strong>{p.name}</strong></a>
+              {#if p.birthday}<span class="muted"> · {formatDate(p.birthday)}</span>{/if}
+            </span>
             {#if p.user_id === null && canManage(p)}
               <span class="row">
                 <button class="secondary small" onclick={() => rename(p)}>{t('rename')}</button>
@@ -123,6 +135,7 @@
     </ul>
     <form class="row" onsubmit={addPerson}>
       <input type="text" bind:value={personName} maxlength="80" placeholder={t('personWithoutAccount')} />
+      <input type="date" bind:value={personBirthday} min="1900-01-01" title={t('birthdayOptional')} aria-label={t('birthdayOptional')} />
       <button disabled={!personName.trim()}>{t('add')}</button>
     </form>
   </div>
@@ -132,7 +145,11 @@
     <ul class="plain">
       {#each circle.members as m (m.user_id)}
         <li class="row between">
-          <span>{m.name} {#if m.role === 'admin'}<span class="muted">({t('circleAdmin')})</span>{/if}</span>
+          <span>
+            {#if m.favorite_color}<span class="dot" style={`background: ${m.favorite_color}`}></span>{/if}
+            {m.name}
+            {#if m.birthday}<span class="muted">· {formatDate(m.birthday)}</span>{/if}
+            {#if m.role === 'admin'}<span class="muted">({t('circleAdmin')})</span>{/if}</span>
           {#if m.user_id === me.id}
             <button class="secondary small" onclick={() => removeMember(m)}>{t('leave')}</button>
           {:else if isAdmin}

@@ -58,7 +58,16 @@ const messages = {
     back: 'Back to {name}',
     home: 'Home',
     profile: 'Profile',
-    displayName: 'Display name',
+    firstName: 'First name',
+    lastName: 'Last name',
+    birthday: 'Birthday',
+    birthdayOptional: 'Birthday (optional)',
+    favoriteColor: 'Favourite colour',
+    invalidBirthday: 'The name or birthday is not valid.',
+    profileTitle: 'Your profile',
+    profileIntro: 'Please tell us who you are. Fields marked * are required.',
+    invalidProfile: 'Please check your entries: first name, last name and a valid birthday are required.',
+    birthdayPrompt: 'Birthday (YYYY-MM-DD, empty for none)',
     save: 'Save',
     saved: 'Saved.',
     invalidName: 'The name is empty or too long.',
@@ -160,7 +169,16 @@ const messages = {
     back: 'Zurück zu {name}',
     home: 'Start',
     profile: 'Profil',
-    displayName: 'Anzeigename',
+    firstName: 'Vorname',
+    lastName: 'Nachname',
+    birthday: 'Geburtstag',
+    birthdayOptional: 'Geburtstag (optional)',
+    favoriteColor: 'Lieblingsfarbe',
+    invalidBirthday: 'Name oder Geburtstag sind ungültig.',
+    profileTitle: 'Dein Profil',
+    profileIntro: 'Bitte sag uns, wer du bist. Mit * markierte Felder sind Pflicht.',
+    invalidProfile: 'Bitte prüfe deine Angaben: Vorname, Nachname und ein gültiger Geburtstag sind Pflicht.',
+    birthdayPrompt: 'Geburtstag (JJJJ-MM-TT, leer für keinen)',
     save: 'Speichern',
     saved: 'Gespeichert.',
     invalidName: 'Der Name ist leer oder zu lang.',
@@ -204,6 +222,11 @@ const messages = {
     inviteInvalid: 'Dieser Einladungslink ist ungültig oder abgelaufen. Frage nach einem neuen.',
   },
 };
+
+export function formatDate(iso) {
+  const d = new Date(`${iso}T00:00:00`);
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString(i18n.lang, { dateStyle: 'long' });
+}
 
 export const languages = Object.keys(messages);
 
