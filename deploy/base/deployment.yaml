@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wishlist
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: wishlist
+  template:
+    metadata:
+      labels:
+        app: wishlist
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: wishlist
+          image: wishlist
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: WISHLIST_ACCESS_TEAM_DOMAIN
+              valueFrom:
+                secretKeyRef:
+                  name: wishlist-access
+                  key: team-domain
+            - name: WISHLIST_ACCESS_AUD
+              valueFrom:
+                secretKeyRef:
+                  name: wishlist-access
+                  key: audience
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
