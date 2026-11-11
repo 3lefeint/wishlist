@@ -6,7 +6,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -19,6 +18,7 @@ import (
 
 	"github.com/3lefeint/wishlist/internal/access"
 	"github.com/3lefeint/wishlist/internal/db"
+	"github.com/3lefeint/wishlist/internal/server"
 	"github.com/3lefeint/wishlist/internal/users"
 )
 
@@ -74,32 +74,22 @@ func main() {
 	store := users.NewStore(pool, admins, maxPending)
 	verifier := access.NewVerifier(team, aud)
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
-		if err := pool.Ping(r.Context()); err != nil {
-			http.Error(w, "database unavailable", http.StatusServiceUnavailable)
-			return
-		}
-		_, _ = w.Write([]byte("ok"))
-	})
-	mux.Handle("GET /api/me", verifier.Middleware(func(w http.ResponseWriter, r *http.Request, c *access.Claims) {
-		u, err := store.SignIn(r.Context(), c.Email)
-		if errors.Is(err, users.ErrPendingLimit) {
-			http.Error(w, "registration temporarily closed", http.StatusServiceUnavailable)
-			return
-		}
-		if err != nil {
-			log.Error("sign in", "err", err)
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(u)
-	}))
+	api := &server.Server{
+		Store: store,
+		Auth: func(r *http.Request) (string, error) {
+			c, err := verifier.Verify(r.Header.Get(access.Header))
+			if err != nil {
+				return "", err
+			}
+			return c.Email, nil
+		},
+		Ping: pool.Ping,
+		Log:  log,
+	}
 
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           mux,
+		Handler:           api.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	go func() {
