@@ -16,6 +16,27 @@ spec:
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
+      initContainers:
+        - name: migrate
+          image: wishlist
+          args: ["migrate"]
+          env:
+            - name: WISHLIST_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: wishlist-migrate
+                  key: url
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
       containers:
         - name: wishlist
           image: wishlist
@@ -33,6 +54,11 @@ spec:
                 secretKeyRef:
                   name: wishlist-access
                   key: audience
+            - name: WISHLIST_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: wishlist-database
+                  key: url
           readinessProbe:
             httpGet:
               path: /healthz
