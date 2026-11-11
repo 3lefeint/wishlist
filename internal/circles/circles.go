@@ -167,13 +167,23 @@ func (s *Store) List(ctx context.Context, userID int64) ([]Circle, error) {
 
 // Get returns a circle with members, persons and, for administrators, the invite.
 func (s *Store) Get(ctx context.Context, userID, circleID int64) (Detail, error) {
-	d := Detail{}
 	r, err := role(ctx, s.pool, circleID, userID)
 	if err != nil {
-		return d, err
+		return Detail{}, err
 	}
+	return s.load(ctx, circleID, r)
+}
+
+// load reads a circle for a viewer with the given role; only a circle
+// administrator gets the invite link.
+func (s *Store) load(ctx context.Context, circleID int64, r string) (Detail, error) {
+	d := Detail{}
 	d.ID, d.Role = circleID, r
-	if err := s.pool.QueryRow(ctx, `SELECT name FROM circles WHERE id = $1`, circleID).Scan(&d.Name); err != nil {
+	err := s.pool.QueryRow(ctx, `SELECT name FROM circles WHERE id = $1`, circleID).Scan(&d.Name)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return d, ErrNotFound
+	}
+	if err != nil {
 		return d, err
 	}
 
@@ -264,6 +274,15 @@ func (s *Store) RemoveMember(ctx context.Context, actorID, circleID, targetID in
 	if actorID != targetID && ar != "admin" {
 		return ErrForbidden
 	}
+	if err := removeMember(ctx, tx, circleID, targetID); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// removeMember removes a member inside a transaction. The last member takes the
+// circle with them; the last administrator cannot leave while others remain.
+func removeMember(ctx context.Context, tx pgx.Tx, circleID, targetID int64) error {
 	tr, err := role(ctx, tx, circleID, targetID)
 	if err != nil {
 		return err
@@ -275,10 +294,8 @@ func (s *Store) RemoveMember(ctx context.Context, actorID, circleID, targetID in
 		return err
 	}
 	if others == 0 {
-		if _, err := tx.Exec(ctx, `DELETE FROM circles WHERE id = $1`, circleID); err != nil {
-			return err
-		}
-		return tx.Commit(ctx)
+		_, err := tx.Exec(ctx, `DELETE FROM circles WHERE id = $1`, circleID)
+		return err
 	}
 	if tr == "admin" && otherAdmins == 0 {
 		return ErrLastAdmin
@@ -286,10 +303,8 @@ func (s *Store) RemoveMember(ctx context.Context, actorID, circleID, targetID in
 	if err := dropMemberData(ctx, tx, circleID, targetID); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `DELETE FROM circle_members WHERE circle_id = $1 AND user_id = $2`, circleID, targetID); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
+	_, err = tx.Exec(ctx, `DELETE FROM circle_members WHERE circle_id = $1 AND user_id = $2`, circleID, targetID)
+	return err
 }
 
 func dropMemberData(ctx context.Context, tx pgx.Tx, circleID, userID int64) error {

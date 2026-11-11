@@ -3,6 +3,7 @@
   import { api } from '../api.svelte.js';
   import { refreshPending } from '../admin.svelte.js';
   import { t } from '../i18n.svelte.js';
+  import AdminNav from './AdminNav.svelte';
 
   let filter = $state('pending');
   let list = $state(null);
@@ -39,6 +40,7 @@
   onMount(load);
 </script>
 
+<AdminNav current="users" />
 <h1>{t('adminTitle')}</h1>
 
 <div class="row" style="margin-bottom: 1rem">

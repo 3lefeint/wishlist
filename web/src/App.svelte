@@ -8,6 +8,8 @@
   import Circle from './views/Circle.svelte';
   import Join from './views/Join.svelte';
   import Admin from './views/Admin.svelte';
+  import AdminCircles from './views/AdminCircles.svelte';
+  import AdminCircle from './views/AdminCircle.svelte';
   import Person from './views/Person.svelte';
   import Profile from './views/Profile.svelte';
 
@@ -37,7 +39,10 @@
     if ((p = match('/persons/:id', router.path))) return { view: 'person', ...p };
     if ((p = match('/join/:token', router.path))) return { view: 'join', ...p };
     if (match('/profile', router.path)) return { view: 'profile' };
-    if (match('/admin', router.path) && state.kind === 'ok' && state.user.is_admin) return { view: 'admin' };
+    const isAdmin = state.kind === 'ok' && state.user.is_admin;
+    if (isAdmin && match('/admin', router.path)) return { view: 'admin' };
+    if (isAdmin && match('/admin/circles', router.path)) return { view: 'adminCircles' };
+    if (isAdmin && (p = match('/admin/circles/:id', router.path))) return { view: 'adminCircle', ...p };
     return { view: 'notfound' };
   });
 </script>
@@ -111,6 +116,10 @@
     <Join token={route.token} />
   {:else if route.view === 'admin'}
     <Admin />
+  {:else if route.view === 'adminCircles'}
+    <AdminCircles />
+  {:else if route.view === 'adminCircle'}
+    {#key route.id}<AdminCircle id={route.id} />{/key}
   {:else if route.view === 'profile'}
     <Profile me={state.user} onchange={(u) => (state = { kind: 'ok', user: u })} />
   {:else}
