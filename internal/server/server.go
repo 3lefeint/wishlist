@@ -10,12 +10,14 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/3lefeint/wishlist/internal/circles"
 	"github.com/3lefeint/wishlist/internal/users"
 )
 
 // Server serves the API.
 type Server struct {
-	Store *users.Store
+	Store   *users.Store
+	Circles *circles.Store
 	// Auth returns the verified e-mail address of the request or an error.
 	Auth func(*http.Request) (string, error)
 	// Ping checks the database.
@@ -38,6 +40,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/me", s.signedIn(func(w http.ResponseWriter, r *http.Request, u users.User) {
 		writeJSON(w, http.StatusOK, u)
 	}))
+	mux.Handle("PUT /api/me", s.signedIn(s.setName))
+	s.circleRoutes(mux)
 	mux.Handle("GET /api/admin/users", s.admin(s.listUsers))
 	mux.Handle("PUT /api/admin/users/{id}/status", s.admin(s.setStatus))
 	mux.Handle("DELETE /api/admin/users/{id}", s.admin(s.deleteUser))
@@ -103,8 +107,7 @@ func (s *Server) setStatus(w http.ResponseWriter, r *http.Request, _ users.User)
 	var body struct {
 		Status string `json:"status"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10)).Decode(&body); err != nil {
-		http.Error(w, "invalid body", http.StatusBadRequest)
+	if !decode(w, r, &body) {
 		return
 	}
 	u, err := s.Store.SetStatus(r.Context(), id, body.Status)
@@ -147,8 +150,10 @@ func (s *Server) internal(w http.ResponseWriter, what string, err error) {
 	http.Error(w, "internal error", http.StatusInternalServerError)
 }
 
-func pathID(w http.ResponseWriter, r *http.Request) (int64, bool) {
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+func pathID(w http.ResponseWriter, r *http.Request) (int64, bool) { return pathInt(w, r, "id") }
+
+func pathInt(w http.ResponseWriter, r *http.Request, name string) (int64, bool) {
+	id, err := strconv.ParseInt(r.PathValue(name), 10, 64)
 	if err != nil || id <= 0 {
 		http.Error(w, "invalid id", http.StatusBadRequest)
 		return 0, false
@@ -160,4 +165,42 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+func decode(w http.ResponseWriter, r *http.Request, v any) bool {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(v); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return false
+	}
+	return true
+}
+
+func (s *Server) setName(w http.ResponseWriter, r *http.Request, u users.User) {
+	var body struct {
+		Name string `json:"name"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	updated, err := s.Store.SetName(r.Context(), u.ID, body.Name)
+	if errors.Is(err, users.ErrInvalidName) {
+		http.Error(w, "invalid name", http.StatusBadRequest)
+		return
+	}
+	if err != nil {
+		s.internal(w, "set name", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, updated)
+}
+
+// member lets only approved users through.
+func (s *Server) member(next func(http.ResponseWriter, *http.Request, users.User)) http.Handler {
+	return s.signedIn(func(w http.ResponseWriter, r *http.Request, u users.User) {
+		if u.Status != users.StatusApproved {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		next(w, r, u)
+	})
 }

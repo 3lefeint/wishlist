@@ -24,7 +24,7 @@ func newTestStore(t *testing.T, admins []string, maxPending int) *Store {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	if _, err := pool.Exec(ctx, "TRUNCATE users RESTART IDENTITY"); err != nil {
+	if _, err := pool.Exec(ctx, "TRUNCATE users, circles RESTART IDENTITY CASCADE"); err != nil {
 		t.Fatal(err)
 	}
 	return NewStore(pool, admins, maxPending)

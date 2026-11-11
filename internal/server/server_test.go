@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/3lefeint/wishlist/internal/circles"
 	"github.com/3lefeint/wishlist/internal/db"
 	"github.com/3lefeint/wishlist/internal/users"
 )
@@ -31,11 +32,12 @@ func newTestServer(t *testing.T) *httptest.Server {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	if _, err := pool.Exec(ctx, "TRUNCATE users RESTART IDENTITY"); err != nil {
+	if _, err := pool.Exec(ctx, "TRUNCATE users, circles RESTART IDENTITY CASCADE"); err != nil {
 		t.Fatal(err)
 	}
 	s := &Server{
-		Store: users.NewStore(pool, []string{"root@example.com"}, 10),
+		Store:   users.NewStore(pool, []string{"root@example.com"}, 10),
+		Circles: circles.NewStore(pool),
 		Auth: func(r *http.Request) (string, error) {
 			if e := r.Header.Get("X-Test-Email"); e != "" {
 				return e, nil

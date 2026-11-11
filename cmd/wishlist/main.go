@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/3lefeint/wishlist/internal/access"
+	"github.com/3lefeint/wishlist/internal/circles"
 	"github.com/3lefeint/wishlist/internal/db"
 	"github.com/3lefeint/wishlist/internal/server"
 	"github.com/3lefeint/wishlist/internal/users"
@@ -73,10 +74,12 @@ func main() {
 	defer pool.Close()
 
 	store := users.NewStore(pool, admins, maxPending)
+	circleStore := circles.NewStore(pool)
 	verifier := access.NewVerifier(team, aud)
 
 	api := &server.Server{
-		Store: store,
+		Store:   store,
+		Circles: circleStore,
 		Auth: func(r *http.Request) (string, error) {
 			c, err := verifier.Verify(r.Header.Get(access.Header))
 			if err != nil {

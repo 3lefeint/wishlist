@@ -5,6 +5,7 @@
   --accent: #7c3aed;
   --card: #ffffff;
   --border: #e5e0f5;
+  --danger: #b42318;
   color-scheme: light dark;
 }
 @media (prefers-color-scheme: dark) {
@@ -14,6 +15,7 @@
     --muted: #9a94b5;
     --card: #1e1a2e;
     --border: #322c4a;
+    --danger: #f97066;
   }
 }
 * { box-sizing: border-box; }
@@ -23,3 +25,58 @@ body {
   color: var(--fg);
   font: 16px/1.5 system-ui, sans-serif;
 }
+a { color: var(--accent); }
+h1 { margin: 0 0 0.75rem; font-size: 1.4rem; }
+h2 { margin: 1.5rem 0 0.5rem; font-size: 1.1rem; }
+.muted { color: var(--muted); }
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1rem 1.25rem;
+  margin-bottom: 1rem;
+}
+.row { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.row.between { justify-content: space-between; }
+ul.plain { list-style: none; margin: 0; padding: 0; }
+ul.plain li { padding: 0.5rem 0; border-bottom: 1px solid var(--border); }
+ul.plain li:last-child { border-bottom: 0; }
+button, .button {
+  background: var(--accent);
+  color: #fff;
+  border: 0;
+  border-radius: 8px;
+  padding: 0.45rem 0.9rem;
+  font: inherit;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
+}
+button.secondary { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+button.danger { background: transparent; color: var(--danger); border: 1px solid var(--danger); }
+button.small { padding: 0.2rem 0.6rem; font-size: 0.9rem; }
+button:disabled { opacity: 0.5; cursor: default; }
+input, select, textarea {
+  font: inherit;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--fg);
+  max-width: 100%;
+}
+input[type='text'], input[type='url'], textarea { width: 100%; }
+label.field { display: block; margin-bottom: 0.75rem; }
+label.field > span { display: block; font-size: 0.9rem; color: var(--muted); }
+.error { color: var(--danger); margin: 0.5rem 0; }
+.badge {
+  display: inline-block;
+  min-width: 1.4rem;
+  padding: 0 0.4rem;
+  border-radius: 999px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 0.8rem;
+  text-align: center;
+}
+.chip { display: inline-block; padding: 0 0.6rem; border-radius: 999px; font-size: 0.85rem; margin-right: 0.3rem; }
